@@ -1,0 +1,1403 @@
+/* ============================================================
+   Vidget — pull-down overlay shade for Windows 11
+   The window is transparent; everything you see is drawn here.
+   ============================================================ */
+
+:root {
+  --panel-h: 288px;
+  --pull: 0px; /* how far the shade has been dragged down */
+
+  --bg: #111318;
+  --card: #1e212a;
+  --card-hi: #2a2e38;
+  --line: rgba(255, 255, 255, 0.07);
+  --fg: #f0f2f6;
+  --fg-dim: rgba(240, 242, 246, 0.56);
+  --fg-faint: rgba(240, 242, 246, 0.3);
+  --accent: #3d8bff;
+  --radius: 18px;
+}
+
+#sprite {
+  display: none;
+}
+
+/* Elements here set display explicitly (grid/flex), which beats the browser's
+   own rule for [hidden] - so state it once, loudly, for everything. */
+[hidden] {
+  display: none !important;
+}
+
+.i {
+  display: block;
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  flex: 0 0 auto;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-user-drag: none;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  color: var(--fg);
+  font-size: 13px;
+  cursor: default;
+  user-select: none;
+}
+
+#stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* ── closed: the little tab on the desktop ───────────────── */
+#handle {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 260px;
+  height: 32px;
+  display: grid;
+  place-items: start center;
+  z-index: 30;
+  cursor: grab;
+}
+
+#handle .pill {
+  display: grid;
+  place-items: center;
+  width: 190px;
+  height: 22px;
+  border-radius: 0 0 14px 14px;
+  background: rgba(30, 34, 44, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  opacity: 0.34;
+  transition: width 0.22s cubic-bezier(0.2, 0.9, 0.25, 1),
+    height 0.22s cubic-bezier(0.2, 0.9, 0.25, 1), opacity 0.22s ease;
+}
+
+#handle .pill i {
+  display: block;
+  width: 54px;
+  height: 3px;
+  border-radius: 3px;
+  background: rgba(235, 240, 255, 0.8);
+}
+
+body.hover #handle .pill {
+  width: 236px;
+  height: 27px;
+  opacity: 1;
+}
+
+body.open #handle,
+body.dragging #handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── the shade ───────────────────────────────────────────── */
+#panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: var(--panel-h);
+  transform: translateY(calc(-100% + var(--pull)));
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 20;
+}
+
+/* The shade's drop shadow would otherwise bleed down past the closed handle,
+   so it only exists while the shade is on screen. */
+body.open #panel,
+body.dragging #panel,
+body.animating #panel {
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5);
+}
+
+/* Catches clicks in the empty space under the shade. */
+#backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+body.open #backdrop {
+  pointer-events: auto;
+}
+
+body.animating #panel {
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+body.open #panel {
+  transform: translateY(0);
+}
+
+/* the small blue grab bar at the top of the open shade */
+#grip {
+  flex: 0 0 auto;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  padding-top: 6px;
+  cursor: grab;
+}
+
+#grip span {
+  width: 64px;
+  height: 4px;
+  border-radius: 3px;
+  background: var(--accent);
+  opacity: 0.85;
+}
+
+#grip:hover span {
+  opacity: 1;
+  width: 84px;
+}
+
+/* ── tabs ────────────────────────────────────────────────── */
+#tabs {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px 0;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  flex: 1 1 0;
+  height: 40px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: grab;
+  position: relative;
+  transition: color 0.16s ease, border-color 0.16s ease,
+    transform 0.18s cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+/* The dragged tab follows the pointer directly; only its neighbours animate. */
+.tab.dragging {
+  transition: color 0.16s ease, border-color 0.16s ease;
+  cursor: grabbing;
+  z-index: 3;
+}
+
+.tab:hover {
+  color: var(--fg);
+}
+
+.tab.is-active {
+  color: #fff;
+  border-bottom-color: var(--accent);
+}
+
+.tab .i {
+  width: 15px;
+  height: 15px;
+  opacity: 0.85;
+}
+
+.icon-btn {
+  height: 28px;
+  min-width: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+}
+
+.icon-btn .i {
+  width: 16px;
+  height: 16px;
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--fg);
+}
+
+.btn {
+  height: 28px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn:hover {
+  filter: brightness(1.1);
+}
+
+/* ── views ───────────────────────────────────────────────── */
+#views {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 14px 16px 16px;
+  gap: 10px;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.view.is-active {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+/* ── music ───────────────────────────────────────────────── */
+.player {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 20px;
+  min-height: 0;
+}
+
+#art {
+  width: 84px;
+  height: 84px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #3a3f4c, #22252d);
+  display: grid;
+  place-items: center;
+  font-size: 30px;
+  color: var(--fg-faint);
+  overflow: hidden;
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+#art.has-art #art-letter {
+  display: none;
+}
+
+#np-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scroller {
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image: linear-gradient(90deg, #000 90%, transparent);
+}
+
+.scroller > span {
+  display: inline-block;
+  will-change: transform;
+}
+
+.scroller.marquee > span {
+  animation: drift 15s linear infinite alternate;
+}
+
+@keyframes drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(var(--drift, -30px));
+  }
+}
+
+#np-title {
+  font-size: 16px;
+  font-weight: 650;
+}
+
+#np-artist {
+  font-size: 13px;
+  color: var(--fg-dim);
+}
+
+#seek {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+#seek-track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.13);
+  cursor: pointer;
+}
+
+#seek-track::before {
+  content: "";
+  position: absolute;
+  inset: -9px 0;
+}
+
+#seek-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-radius: 3px;
+  background: #fff;
+}
+
+#seek-knob {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 11px;
+  height: 11px;
+  margin-left: -5.5px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translateY(-50%) scale(0);
+  transition: transform 0.15s ease;
+  pointer-events: none;
+}
+
+#seek-track:hover #seek-knob,
+body.seeking #seek-knob {
+  transform: translateY(-50%) scale(1);
+}
+
+#controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 0 0 auto;
+}
+
+.ctl {
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background 0.15s ease, transform 0.1s ease, color 0.15s ease;
+}
+
+.ctl:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.ctl:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.ctl:disabled {
+  color: var(--fg-faint);
+  cursor: default;
+}
+
+.ctl.small {
+  width: 32px;
+  height: 32px;
+  color: var(--fg-dim);
+}
+
+.ctl.small .i {
+  width: 16px;
+  height: 16px;
+}
+
+.ctl.small.on {
+  color: var(--accent);
+}
+
+.ctl-main {
+  width: 48px;
+  height: 48px;
+  background: #fff;
+  color: #14161c;
+}
+
+.ctl-main .i {
+  width: 20px;
+  height: 20px;
+}
+
+.ctl-main:hover:not(:disabled) {
+  background: #fff;
+  filter: brightness(0.94);
+}
+
+#vol {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  width: 120px;
+}
+
+#vol-track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.13);
+  cursor: pointer;
+}
+
+#vol-track::before {
+  content: "";
+  position: absolute;
+  inset: -9px 0;
+}
+
+#vol-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 60%;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+#vol-knob {
+  position: absolute;
+  top: 50%;
+  left: 60%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+#vol.off {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+#np-app {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--fg-faint);
+  text-align: center;
+}
+
+/* ── toolbars ────────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.toolbar input,
+.toolbar textarea {
+  height: 34px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+  user-select: text;
+}
+
+.toolbar input::placeholder,
+.toolbar textarea::placeholder {
+  color: var(--fg-faint);
+}
+
+.toolbar input:focus,
+.toolbar textarea:focus {
+  border-color: rgba(61, 139, 255, 0.55);
+}
+
+#note-quick {
+  padding: 7px 13px;
+  line-height: 1.4;
+  resize: none;
+  overflow: hidden;
+  max-height: 88px;
+  font: inherit;
+}
+
+#clip-search,
+#note-quick,
+#yt-search {
+  flex: 1 1 auto;
+}
+
+#note-search {
+  flex: 0 0 190px;
+}
+
+/* ── horizontal card strips ──────────────────────────────── */
+.strip {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.strip::-webkit-scrollbar {
+  height: 7px;
+}
+
+.strip::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+}
+
+.empty {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  text-align: center;
+  color: var(--fg-faint);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.chip {
+  position: relative;
+  flex: 0 0 auto;
+  width: 196px;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 11px 8px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+
+.chip:hover {
+  background: var(--card-hi);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.chip:active {
+  transform: scale(0.985);
+}
+
+.chip.pinned {
+  border-color: rgba(61, 139, 255, 0.5);
+}
+
+.chip .txt {
+  flex: 1 1 auto;
+  min-height: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  color: var(--fg);
+}
+
+.chip .txt.url {
+  color: #7cc0ff;
+}
+
+.chip .txt.mono {
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 11.5px;
+}
+
+.chip .shot {
+  flex: 1 1 auto;
+  min-height: 0;
+  border-radius: 8px;
+  background-size: cover;
+  background-position: center;
+  background-color: rgba(0, 0, 0, 0.35);
+}
+
+.chip .foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 10.5px;
+  color: var(--fg-faint);
+}
+
+.chip .acts {
+  display: none;
+  gap: 2px;
+}
+
+.chip:hover .acts {
+  display: flex;
+}
+
+.chip .acts button {
+  width: 22px;
+  height: 20px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--fg-dim);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.chip .acts button .i {
+  width: 12px;
+  height: 12px;
+}
+
+.chip .acts button.on {
+  color: var(--accent);
+}
+
+.chip .acts button:hover {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+.chip .swatch {
+  width: 100%;
+  flex: 1 1 auto;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+/* sticky notes */
+.chip.note {
+  width: 250px;
+  color: #1c1d20;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+}
+
+.chip.note .title {
+  font-weight: 700;
+  font-size: 12.5px;
+  margin-bottom: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip.note .txt {
+  color: rgba(28, 29, 32, 0.82);
+}
+
+.chip.note .foot {
+  color: rgba(28, 29, 32, 0.5);
+}
+
+.chip.note .acts button {
+  background: rgba(0, 0, 0, 0.1);
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.chip.note .acts button:hover {
+  background: rgba(0, 0, 0, 0.22);
+  color: #000;
+}
+
+/* ── overlays ────────────────────────────────────────────── */
+#preview,
+#note-editor {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  border-radius: 0 0 var(--radius) var(--radius);
+  display: flex;
+  flex-direction: column;
+  z-index: 26;
+}
+
+#preview[hidden],
+#note-editor[hidden] {
+  display: none;
+}
+
+.overlay-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+
+.overlay-bar span {
+  flex: 1 1 auto;
+  font-size: 11.5px;
+  color: var(--fg-faint);
+}
+
+#pv-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  scrollbar-width: thin;
+}
+
+#pv-body img {
+  max-width: 100%;
+  border-radius: 10px;
+  display: block;
+  margin: 0 auto;
+}
+
+#note-text {
+  flex: 1 1 auto;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.6;
+  padding: 14px 18px;
+  user-select: text;
+  scrollbar-width: thin;
+}
+
+/* ── misc ────────────────────────────────────────────────── */
+#toast {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--panel-h) + 14px);
+  transform: translate(-50%, -8px);
+  padding: 7px 16px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.86);
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 40;
+}
+
+#toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+#menu {
+  position: absolute;
+  top: 54px;
+  right: 16px;
+  background: var(--card-hi);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 5px;
+  z-index: 45;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+  min-width: 210px;
+}
+
+#menu[hidden] {
+  display: none;
+}
+
+#menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 11px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+#menu button:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.icon-btn.on {
+  color: var(--accent);
+}
+
+/* ── reactions ───────────────────────────────────────────── */
+#reactions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+#like.on {
+  color: #ff4d6a;
+}
+
+#dislike.on {
+  color: var(--accent);
+}
+
+#reactions .ctl.pending {
+  opacity: 0.45;
+}
+
+#reactions .ctl.off {
+  color: var(--fg-faint);
+}
+
+/* ── Yandex account panel ────────────────────────────────── */
+#ya-auth {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  border-radius: 0 0 var(--radius) var(--radius);
+  display: flex;
+  flex-direction: column;
+  z-index: 27;
+}
+
+#ya-auth[hidden] {
+  display: none;
+}
+
+#ya-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 20px 18px;
+  scrollbar-width: thin;
+}
+
+#ya-body .lead {
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+#ya-body .steps {
+  margin: 0 0 14px 18px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--fg-dim);
+}
+
+#ya-body code {
+  font-family: Consolas, "Cascadia Mono", monospace;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.ya-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ya-row input {
+  flex: 1 1 auto;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+  user-select: text;
+}
+
+.ya-row input:focus {
+  border-color: rgba(61, 139, 255, 0.55);
+}
+
+.btn.ghost {
+  background: var(--card-hi);
+  color: var(--fg);
+}
+
+#ya-msg {
+  margin-top: 12px;
+  font-size: 12px;
+  min-height: 16px;
+  color: var(--fg-faint);
+}
+
+#ya-msg.bad {
+  color: #ff7b7b;
+}
+
+#ya-msg.good {
+  color: #6fd08c;
+}
+
+/* ── file drops in the clipboard strip ───────────────────── */
+.chip.files .flist {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.chip.files .frow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.chip.files .frow .i {
+  width: 15px;
+  height: 15px;
+  color: var(--fg-dim);
+}
+
+.chip.files .frow.dir .i {
+  color: #e8c169;
+}
+
+.chip.files .fname {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip.files .frow.gone .fname {
+  color: var(--fg-faint);
+  text-decoration: line-through;
+}
+
+.chip.files .fmore {
+  font-size: 11px;
+  color: var(--fg-faint);
+  padding-left: 22px;
+}
+
+#pv-body .pv-file {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+#pv-body .pv-file:last-child {
+  border-bottom: none;
+}
+
+#pv-body .pv-file .i {
+  width: 17px;
+  height: 17px;
+  color: var(--fg-dim);
+  flex: 0 0 auto;
+}
+
+#pv-body .pv-file .pv-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  word-break: break-all;
+  white-space: normal;
+}
+
+#pv-body .pv-file .pv-size {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── nothing is playing ──────────────────────────────────── */
+#open-player {
+  display: none;
+  white-space: nowrap;
+}
+
+body.no-media #open-player {
+  display: inline-flex;
+  align-items: center;
+}
+
+body.no-media #seek,
+body.no-media #controls,
+body.no-media #reactions,
+body.no-media #vol {
+  display: none;
+}
+
+/* ── youtube ─────────────────────────────────────────────── */
+#yt-row {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 10px;
+}
+
+#yt-player {
+  flex: 0 0 auto;
+  width: 372px;
+  display: flex;
+  gap: 12px;
+  padding: 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+#yt-player[hidden] {
+  display: none;
+}
+
+#yt-frame {
+  position: relative;
+  flex: 0 0 auto;
+  width: 176px;
+  height: 99px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+}
+
+#yt-frame iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* Sits over the player so a click opens the video in the browser instead of
+   hitting YouTube's own controls; ours are next to it. */
+#yt-click {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+}
+
+#yt-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+#yt-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#yt-channel {
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#yt-controls {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#yt-controls .btn {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.chip.video {
+  width: 176px;
+}
+
+/* Cover, two title lines and the footer have to fit the strip's height, so the
+   cover is sized from what is left rather than the other way round. */
+.chip.video .cover {
+  position: relative;
+  width: 100%;
+  height: 86px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background-color: rgba(0, 0, 0, 0.35);
+  background-size: cover;
+  background-position: center;
+}
+
+.chip.video .len {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.82);
+  font-size: 10.5px;
+  color: #fff;
+}
+
+.chip.video .len.live {
+  background: #e02b2b;
+}
+
+.chip.video .vtitle {
+  flex: 0 0 auto;
+  margin-top: 7px;
+  font-size: 12px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── track search ────────────────────────────────────────── */
+#ym-search {
+  flex: 1 1 auto;
+}
+
+#ym-strip {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+#ym-strip[hidden] {
+  display: none;
+}
+
+.trow {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 6px 9px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+
+.trow:hover {
+  background: var(--card-hi);
+}
+
+.trow .tcover {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  background-color: rgba(0, 0, 0, 0.3);
+  background-size: cover;
+  background-position: center;
+}
+
+.trow .tinfo {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.trow .tname,
+.trow .tart {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trow .tname {
+  font-size: 12.5px;
+}
+
+.trow .tart {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.trow .theart {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  fill: #ff4d6a;
+}
+
+.trow .tdur {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── pinned marker ───────────────────────────────────────── */
+/* The action row only appears on hover, so pinning needs its own mark. */
+.pin-flag {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  background: rgba(61, 139, 255, 0.16);
+  pointer-events: none;
+}
+
+.pin-flag .i {
+  width: 11px;
+  height: 11px;
+  fill: var(--accent);
+}
+
+.chip:hover .pin-flag {
+  display: none;
+}
+
+.chip.pinned {
+  border-color: rgba(61, 139, 255, 0.55);
+}
+
+/* Sticky notes paint their own background and border, so the pinned state and
+   the active pin button need colours that read on a pastel card. */
+.chip.note.pinned {
+  border-color: rgba(20, 60, 130, 0.55);
+  box-shadow: 0 0 0 1px rgba(20, 60, 130, 0.35) inset;
+}
+
+.chip.note .pin-flag {
+  background: rgba(20, 60, 130, 0.16);
+}
+
+.chip.note .pin-flag .i {
+  fill: #163c78;
+}
+
+.chip.note .acts button.on {
+  background: rgba(20, 60, 130, 0.2);
+  color: #163c78;
+}
+
+#ym-strip .empty-inline {
+  padding: 14px 4px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.player[hidden],
+#np-app[hidden] {
+  display: none;
+}
+
+/* Kept rendered but off the panel: hiding it outright would stop playback. */
+#ym-engine {
+  position: absolute;
+  left: -10000px;
+  top: 0;
+  width: 440px;
+  height: 100px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+#ym-engine iframe {
+  display: block;
+  border: 0;
+  width: 440px;
+  height: 100px;
+}

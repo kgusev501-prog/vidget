@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'none'; img-src data: blob: https://i.ytimg.com https://*.ytimg.com https://avatars.yandex.net;
+                   style-src 'self' 'unsafe-inline'; script-src 'self';
+                   frame-src https://www.youtube.com https://music.yandex.ru; connect-src 'self';" />
+    <title>Vidget</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- icon sprite: referenced with <use href="#i-…"> -->
+    <svg id="sprite" aria-hidden="true">
+      <symbol id="i-music" viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></symbol>
+      <symbol id="i-clip" viewBox="0 0 24 24"><path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></symbol>
+      <symbol id="i-note" viewBox="0 0 24 24"><path d="M3 5h18v2H3V5zm0 6h18v2H3v-2zm0 6h12v2H3v-2z"/></symbol>
+      <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6L18 18V6z"/></symbol>
+      <symbol id="i-next" viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></symbol>
+      <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M10.59 9.17 5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></symbol>
+      <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></symbol>
+      <symbol id="i-repeat1" viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z"/></symbol>
+      <symbol id="i-vol" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></symbol>
+      <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73 4.27 3zM12 4 9.91 6.09 12 8.18V4z"/></symbol>
+      <symbol id="i-heart" viewBox="0 0 24 24"><path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z"/></symbol>
+      <symbol id="i-heart-fill" viewBox="0 0 24 24"><path d="m12 21.35-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></symbol>
+      <symbol id="i-thumbdown" viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></symbol>
+      <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 7V3.5L18.5 9H13z"/></symbol>
+      <symbol id="i-zip" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 7V3.5L18.5 9H13zM9 5h2v2H9V5zm2 2h2v2h-2V7zM9 9h2v2H9V9zm2 2h2v2h-2v-2zm-1 3h2v3h-2v-3z"/></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24"><path d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></symbol>
+      <symbol id="i-video" viewBox="0 0 24 24"><path d="M21 6H3a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-11 9V9l5 3-5 3z"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></symbol>
+      <symbol id="i-expand" viewBox="0 0 24 24"><path d="M10 21v-2H6.41l4.3-4.29-1.42-1.42L5 17.59V14H3v7h7zm4-18v2h3.59l-4.3 4.29 1.42 1.42L19 6.41V10h2V3h-7z"/></symbol>
+      <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 17.27 6.18 3.73-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></symbol>
+      <symbol id="i-more" viewBox="0 0 24 24"><path d="M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm12 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm-6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></symbol>
+    </svg>
+
+    <div id="stage">
+      <!-- the tab that hangs on the desktop while everything is closed -->
+      <div id="handle"><span class="pill"><i></i></span></div>
+
+      <div id="backdrop"></div>
+
+      <section id="panel" aria-hidden="true">
+        <div id="grip"><span></span></div>
+
+        <nav id="tabs">
+          <button class="tab is-active" data-tab="music"><svg class="i"><use href="#i-music"/></svg>Музыка</button>
+          <button class="tab" data-tab="clip"><svg class="i"><use href="#i-clip"/></svg>Буфер обмена</button>
+          <button class="tab" data-tab="yt"><svg class="i"><use href="#i-video"/></svg>YouTube</button>
+          <button class="tab" data-tab="notes"><svg class="i"><use href="#i-note"/></svg>Заметки</button>
+          <button id="menu-btn" class="icon-btn" title="Ещё"><svg class="i"><use href="#i-more"/></svg></button>
+        </nav>
+
+        <div id="views">
+          <!-- ── music ─────────────────────────────────────────────── -->
+          <div class="view is-active" data-view="music">
+            <div class="toolbar">
+              <input id="ym-search" type="search" placeholder="Найти трек в Яндекс Музыке…  (Enter)" spellcheck="false" />
+              <button id="ym-clear" class="icon-btn" title="Вернуться к плееру" hidden><svg class="i"><use href="#i-close"/></svg></button>
+            </div>
+
+            <div id="ym-strip" hidden></div>
+
+            <!-- Yandex's own player, parked out of sight: it is only here to
+                 make sound, and Windows lets the panel above drive it. -->
+            <div id="ym-engine"></div>
+
+            <div class="card player">
+              <div id="art"><span id="art-letter">♫</span></div>
+
+              <div id="np-text">
+                <div id="np-title" class="scroller"><span>Ничего не играет</span></div>
+                <div id="np-artist" class="scroller"><span></span></div>
+                <div id="seek">
+                  <span id="t-pos">0:00</span>
+                  <div id="seek-track"><div id="seek-fill"></div><div id="seek-knob"></div></div>
+                  <span id="t-dur">0:00</span>
+                </div>
+              </div>
+
+              <div id="reactions">
+                <button id="like" class="ctl small" title="Нравится"><svg class="i"><use id="like-use" href="#i-heart"/></svg></button>
+                <button id="dislike" class="ctl small" title="Не нравится"><svg class="i"><use href="#i-thumbdown"/></svg></button>
+              </div>
+
+              <div id="controls">
+                <button id="shuffle" class="ctl small" title="Перемешать"><svg class="i"><use href="#i-shuffle"/></svg></button>
+                <button id="prev" class="ctl" title="Предыдущий"><svg class="i"><use href="#i-prev"/></svg></button>
+                <button id="play" class="ctl ctl-main" title="Пуск / пауза"><svg class="i"><use id="play-use" href="#i-play"/></svg></button>
+                <button id="next" class="ctl" title="Следующий"><svg class="i"><use href="#i-next"/></svg></button>
+                <button id="repeat" class="ctl small" title="Повтор"><svg class="i"><use id="repeat-use" href="#i-repeat"/></svg></button>
+              </div>
+
+              <button id="open-player" class="btn ghost">Открыть Яндекс Музыку</button>
+
+              <div id="vol">
+                <button id="vol-icon" class="ctl small" title="Без звука"><svg class="i"><use id="vol-use" href="#i-vol"/></svg></button>
+                <div id="vol-track"><div id="vol-fill"></div><div id="vol-knob"></div></div>
+              </div>
+            </div>
+            <div id="np-app"></div>
+          </div>
+
+          <!-- ── clipboard ─────────────────────────────────────────── -->
+          <div class="view" data-view="clip">
+            <div class="toolbar">
+              <input id="clip-search" type="search" placeholder="Поиск по буферу обмена…" spellcheck="false" />
+              <button id="clip-clear" class="icon-btn" title="Очистить (кроме закреплённых)"><svg class="i"><use href="#i-trash"/></svg></button>
+            </div>
+            <div id="clip-strip" class="strip"></div>
+            <div id="clip-empty" class="empty">Скопируйте что-нибудь — оно появится здесь</div>
+          </div>
+
+
+          <!-- ── youtube ───────────────────────────────────────────── -->
+          <div class="view" data-view="yt">
+            <div class="toolbar">
+              <input id="yt-search" type="search" placeholder="Поиск на YouTube…  (Enter)" spellcheck="false" />
+              <button id="yt-go" class="icon-btn" title="Искать"><svg class="i"><use href="#i-search"/></svg></button>
+            </div>
+
+            <div id="yt-row">
+              <div id="yt-player" hidden>
+                <div id="yt-frame"><div id="yt-click" title="Открыть в браузере"></div></div>
+                <div id="yt-meta">
+                  <div id="yt-title" class="scroller"><span></span></div>
+                  <div id="yt-channel"></div>
+                  <div id="yt-controls">
+                    <button id="yt-play" class="ctl small" title="Пауза"><svg class="i"><use id="yt-play-use" href="#i-pause"/></svg></button>
+                    <button id="yt-stop" class="ctl small" title="Остановить"><svg class="i"><use href="#i-close"/></svg></button>
+                    <button id="yt-browser" class="btn ghost">В браузере</button>
+                  </div>
+                </div>
+              </div>
+
+              <div id="yt-strip" class="strip"></div>
+            </div>
+
+            <div id="yt-empty" class="empty">Введите запрос и нажмите Enter</div>
+          </div>
+
+          <!-- ── notes ─────────────────────────────────────────────── -->
+          <div class="view" data-view="notes">
+            <div class="toolbar">
+              <textarea id="note-quick" rows="1" placeholder="Быстрая заметка…   Enter — сохранить, Shift+Enter — новая строка" spellcheck="false"></textarea>
+              <input id="note-search" type="search" placeholder="Поиск…" spellcheck="false" />
+            </div>
+            <div id="note-strip" class="strip"></div>
+            <div id="note-empty" class="empty">Напишите что-нибудь в поле выше и нажмите Enter</div>
+          </div>
+        </div>
+
+        <!-- overlays live inside the panel so they inherit its rounding -->
+        <div id="preview" hidden>
+          <div class="overlay-bar">
+            <button id="pv-back" class="icon-btn" title="Назад"><svg class="i"><use href="#i-back"/></svg></button>
+            <span id="pv-meta"></span>
+            <button id="pv-copy" class="btn">Копировать</button>
+          </div>
+          <div id="pv-body"></div>
+        </div>
+
+        <div id="note-editor" hidden>
+          <div class="overlay-bar">
+            <button id="note-back" class="icon-btn" title="Назад"><svg class="i"><use href="#i-back"/></svg></button>
+            <span id="note-stamp"></span>
+            <button id="note-pin" class="icon-btn" title="Закрепить"><svg class="i"><use href="#i-star"/></svg></button>
+            <button id="note-del" class="icon-btn" title="Удалить"><svg class="i"><use href="#i-trash"/></svg></button>
+          </div>
+          <textarea id="note-text" placeholder="Пишите…" spellcheck="false"></textarea>
+        </div>
+
+
+        <div id="ya-auth" hidden>
+          <div class="overlay-bar">
+            <button id="ya-back" class="icon-btn" title="Назад"><svg class="i"><use href="#i-back"/></svg></button>
+            <span>Яндекс Музыка — лайки из виджета</span>
+          </div>
+          <div id="ya-body">
+            <div id="ya-connected" hidden>
+              <p class="lead">Подключено как <b id="ya-login"></b>.</p>
+              <button id="ya-forget" class="btn ghost">Отключить аккаунт</button>
+            </div>
+            <div id="ya-form">
+              <ol class="steps">
+                <li>Откройте страницу входа Яндекса и войдите в свой аккаунт.</li>
+                <li>После входа браузер попадёт на адрес с <code>#access_token=…</code> — скопируйте значение токена из адресной строки.</li>
+                <li>Вставьте его сюда. Токен хранится на этом компьютере в зашифрованном виде.</li>
+              </ol>
+              <div class="ya-row">
+                <button id="ya-open" class="btn ghost">Открыть страницу входа</button>
+                <input id="ya-token" type="password" placeholder="Вставьте access_token" spellcheck="false" />
+                <button id="ya-save" class="btn">Подключить</button>
+              </div>
+            </div>
+            <div id="ya-msg"></div>
+          </div>
+        </div>
+
+        <div id="menu" hidden>
+          <button data-act="yandex">Яндекс Музыка: <b id="m-ya">—</b></button>
+          <button data-act="launchPlayer">Запускать плеер со стартом: <b id="m-launch">—</b></button>
+          <button data-act="autostart">Автозапуск: <b id="m-autostart">—</b></button>
+          <button data-act="quit">Выйти из Vidget</button>
+        </div>
+      </section>
+
+      <div id="toast"></div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

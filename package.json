@@ -1,0 +1,58 @@
+{
+  "name": "vidget",
+  "version": "0.1.0",
+  "description": "iOS-style pull-down overlay widget for Windows 11: Yandex Music, clipboard history, notes",
+  "main": "src/main/index.js",
+  "scripts": {
+    "start": "node tools/start.js",
+    "dev": "node tools/start.js --dev",
+    "icons": "node tools/make-icons.js",
+    "dist": "electron-builder --win",
+    "dist:portable": "electron-builder --win --dir -c.win.signAndEditExecutable=false",
+    "predist": "node tools/prepare-signtool.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.vidget.overlay",
+    "productName": "Vidget",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "src/ps/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon-256.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Vidget",
+      "installerLanguages": [
+        "ru_RU",
+        "en_US"
+      ]
+    }
+  }
+}
