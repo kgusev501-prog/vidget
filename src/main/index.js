@@ -278,7 +278,7 @@ function refreshTrayMenu() {
       {
         label: 'Запускать Яндекс Музыку вместе с виджетом',
         type: 'checkbox',
-        checked: settings.get().launchPlayer !== false,
+        checked: settings.get().launchPlayer === true,
         click: (item) => {
           const s = settings.get();
           s.launchPlayer = item.checked;
@@ -362,7 +362,7 @@ async function init() {
   const dir = app.getPath('userData');
   settings = new Store(dir, 'settings', {
     autostart: true,
-    launchPlayer: true,
+    launchPlayer: false,
     hotkey: 'Control+Alt+Space',
     tab: 'music',
   });
@@ -404,9 +404,9 @@ async function init() {
   // Retries on its own: right after a reboot there is often no network yet.
   yandex.startAutoConnect(loadToken);
 
-  // Nothing publishes a media session until the player is running, so bring it
-  // up quietly once the desktop has settled.
-  if (settings.get().launchPlayer !== false) {
+  // Off by default: the widget plays on its own, so starting the desktop app
+  // would only put a second player on the machine. Still available in the menu.
+  if (settings.get().launchPlayer === true) {
     setTimeout(() => player.launch({ minimized: true }).catch(() => {}), 6000);
   }
 

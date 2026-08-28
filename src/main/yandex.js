@@ -46,7 +46,7 @@ class YandexMusic extends EventEmitter {
 
     this.tracks = new Map(); // "artist|title" -> { id, albumId, cover } | null
     this.covers = new Map(); // track id -> data URL
-    this.current = { key: null, id: null, liked: false, disliked: false, state: 'idle' };
+    this.current = { key: null, id: null, albumId: null, cover: null, liked: false, disliked: false, state: 'idle' };
     this.tokenRejected = false;
     this._autoTimer = null;
     this.lastSeen = null;
@@ -166,6 +166,7 @@ class YandexMusic extends EventEmitter {
     this.stopAutoConnect();
     this.tokenRejected = false;
     this.covers.clear();
+    this.current = { key: null, id: null, albumId: null, cover: null, liked: false, disliked: false, state: 'idle' };
     this.token = null;
     this.uid = null;
     this.login = null;
@@ -173,7 +174,6 @@ class YandexMusic extends EventEmitter {
     this.liked.clear();
     this.disliked.clear();
     this.likesAt = 0;
-    this.current = { key: null, id: null, liked: false, disliked: false, state: 'idle' };
     this._pushStatus();
     this._pushTrack();
   }
@@ -205,7 +205,7 @@ class YandexMusic extends EventEmitter {
   async onTrack(key, artist, title) {
     if (key) this.lastSeen = { key, artist, title };
     if (this.current.key === key) return;
-    this.current = { key, id: null, liked: false, disliked: false, state: 'idle' };
+    this.current = { key, id: null, albumId: null, cover: null, liked: false, disliked: false, state: 'idle' };
     if (!this.connected || !key || !title) {
       this._pushTrack();
       return;
@@ -301,8 +301,12 @@ class YandexMusic extends EventEmitter {
     if (!hit) {
       this.current.state = 'unknown';
       this.current.id = null;
+      this.current.albumId = null;
+      this.current.cover = null;
     } else {
       this.current.id = hit.id;
+      this.current.albumId = hit.albumId;
+      this.current.cover = coverUrl(hit.cover, '200x200');
       this.current.state = 'ready';
       this.current.liked = this.liked.has(hit.id);
       this.current.disliked = this.disliked.has(hit.id);

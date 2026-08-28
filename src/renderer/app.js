@@ -293,8 +293,7 @@ function applyState(s) {
       appBox.textContent = 'на паузе';
       $('#art-letter').textContent = (lastTrack.title || '♫').trim().charAt(0).toUpperCase() || '♫';
       artState.smtc = null;
-      artState.ya = lastTrack.cover || null;
-      paintArt();
+      useCover(lastTrack.cover);
     } else {
       setText(titleBox, 'Ничего не играет');
       setText(artistBox, '');
@@ -327,6 +326,9 @@ function applyState(s) {
   }
 
   if (trackChanged) {
+    // Whatever is playing now is what the panel should offer to resume after a
+    // restart — even when it played somewhere else entirely.
+    rememberTrack({ title: s.title, artists: s.artist });
     artState.ya = null; // the new track's cover has not arrived yet
     setText(titleBox, s.title || 'Без названия');
     setText(artistBox, s.artist || '');
@@ -400,10 +402,40 @@ $('#open-player').addEventListener('click', async () => {
 });
 
 $('#play').addEventListener('click', () => {
-  // Nothing is sounding, but the widget remembers what it played last.
-  if (!mediaState.active && lastTrack) return playTrack(lastTrack);
+  // Nothing is sounding, but the widget remembers what played last.
+  if (!mediaState.active && lastTrack) return resumeLastTrack();
   api.media.cmd('playpause');
 });
+
+/** Merges what we learn about the current track into the one we can resume. */
+function rememberTrack(patch) {
+  const same = lastTrack && (!patch.title || patch.title === lastTrack.title);
+  lastTrack = same ? { ...lastTrack, ...patch } : { ...patch };
+  api.app.setSetting('lastTrack', lastTrack);
+}
+
+/**
+ * Starts the remembered track in the widget's own player. If it was never
+ * resolved to a Yandex id — the widget was restarted before that happened —
+ * look it up now by title and artist.
+ */
+async function resumeLastTrack() {
+  if (lastTrack.id && lastTrack.albumId) return playTrack(lastTrack);
+
+  if (!yaStatus.connected) {
+    toast('Сначала подключите аккаунт Яндекса');
+    return openYa();
+  }
+
+  toast('Ищем трек…');
+  const query = [lastTrack.artists, lastTrack.title].filter(Boolean).join(' ');
+  const res = await api.ya.searchTracks(query);
+  const hit = res && res.ok && res.items[0];
+  if (!hit || !hit.albumId) return toast('Не удалось найти этот трек');
+
+  rememberTrack({ id: hit.id, albumId: hit.albumId, cover: hit.cover });
+  playTrack(lastTrack);
+}
 $('#next').addEventListener('click', () => api.media.cmd('next'));
 $('#prev').addEventListener('click', () => api.media.cmd('prev'));
 $('#shuffle').addEventListener('click', () => api.media.cmd('shuffle', !mediaState.shuffle));
@@ -450,6 +482,19 @@ function paintArt() {
   const url = artState.smtc || artState.ya;
   artBox.style.backgroundImage = url ? `url("${url}")` : '';
   artBox.classList.toggle('has-art', !!url);
+}
+
+/** A remembered cover is a plain URL and may be stale; check it before use. */
+function useCover(url) {
+  artState.ya = null;
+  paintArt();
+  if (!url) return;
+  const probe = new Image();
+  probe.onload = () => {
+    artState.ya = url;
+    paintArt();
+  };
+  probe.src = url;
 }
 
 function setArt(data) {
@@ -612,6 +657,8 @@ api.ya.onStatus((st) => {
 
 api.ya.onTrack((t) => {
   yaTrack = t;
+  // Once the track is resolved we know how to start it again by ourselves.
+  if (t.id && t.albumId) rememberTrack({ id: t.id, albumId: t.albumId, cover: t.cover });
   paintReactions();
 });
 
@@ -736,6 +783,8 @@ async function playTrack(track) {
     cover: track.cover || null,
   };
   api.app.setSetting('lastTrack', lastTrack);
+
+  if (!yaStatus.web) toast('Войдите в Яндекс Музыку, чтобы трек играл целиком');
 
   api.media.cmd('pause'); // do not let the desktop player talk over it
   ymEngine.textContent = '';
