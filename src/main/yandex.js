@@ -11,6 +11,10 @@ const AUTH_URL = `https://oauth.yandex.ru/authorize?response_type=token&client_i
 const TIMEOUT = 9000;
 const LIKES_TTL = 10 * 60 * 1000;
 
+// "Моя волна" is a rotor station; the API hands out a few tracks at a time and
+// expects to hear back which of them were played.
+const STATION = 'user:onyourwave';
+
 const mmss = (ms) => {
   const total = Math.round((ms || 0) / 1000);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
@@ -50,6 +54,7 @@ class YandexMusic extends EventEmitter {
     this.tokenRejected = false;
     this._autoTimer = null;
     this.lastSeen = null;
+    this.wave = { queue: [], batchId: null };
   }
 
   get connected() {
@@ -70,7 +75,7 @@ class YandexMusic extends EventEmitter {
   }
 
   // --- transport ------------------------------------------------------------
-  async _req(path, { method = 'GET', query } = {}) {
+  async _req(path, { method = 'GET', query, json } = {}) {
     if (!this.token) throw new Error('Нет токена');
     const url = new URL(API + path);
     if (query) for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
@@ -81,7 +86,9 @@ class YandexMusic extends EventEmitter {
         Authorization: `OAuth ${this.token}`,
         'Accept-Language': 'ru',
         'X-Yandex-Music-Client': 'YandexMusicAndroid/24023621',
+        ...(json ? { 'Content-Type': 'application/json' } : {}),
       },
+      body: json ? JSON.stringify(json) : undefined,
       signal: AbortSignal.timeout(TIMEOUT),
     });
 
@@ -265,6 +272,88 @@ class YandexMusic extends EventEmitter {
       albumId: album ? String(album.id) : null,
       cover: best.coverUri || (album && album.coverUri) || null,
     };
+  }
+
+  // --- Моя волна -----------------------------------------------------------
+  /** Flattens a rotor track into what the panel needs to play it. */
+  _waveTrack(entry) {
+    const t = (entry && entry.track) || {};
+    const album = (t.albums || [])[0];
+    if (!t.id || !album) return null;
+    return {
+      id: String(t.id),
+      albumId: String(album.id),
+      title: t.title + (t.version ? ` (${t.version})` : ''),
+      artists: (t.artists || []).map((a) => a.name).join(', '),
+      duration: t.durationMs ? mmss(t.durationMs) : '',
+      durationMs: t.durationMs || 0,
+      cover: coverUrl(t.coverUri || album.coverUri, '200x200'),
+      liked: this.liked.has(String(t.id)),
+      wave: true,
+    };
+  }
+
+  async _waveFetch(after) {
+    const query = { settings2: true };
+    if (after) query.queue = after;
+    const body = await this._req(`/rotor/station/${STATION}/tracks`, { query });
+    const result = (body && body.result) || {};
+    this.wave.batchId = result.batchId || null;
+    this.wave.queue = (result.sequence || []).map((e) => this._waveTrack(e)).filter(Boolean);
+  }
+
+  /** Best-effort: the station tunes itself from these, but nothing breaks without. */
+  async _waveFeedback(type, extra = {}) {
+    if (!this.connected) return;
+    try {
+      await this._req(`/rotor/station/${STATION}/feedback`, {
+        method: 'POST',
+        query: this.wave.batchId ? { 'batch-id': this.wave.batchId } : undefined,
+        json: { type, timestamp: new Date().toISOString(), ...extra },
+      });
+    } catch {
+      /* the station plays on regardless */
+    }
+  }
+
+  /** First track of a fresh wave. */
+  async waveStart() {
+    if (!this.connected) return { ok: false, error: 'Аккаунт не подключён' };
+    try {
+      await this._waveFetch(null);
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+    if (!this.wave.queue.length) return { ok: false, error: 'Волна ничего не вернула' };
+
+    this._waveFeedback('radioStarted', { from: 'vidget' });
+    return this.waveTake();
+  }
+
+  /** Next track of the running wave, refilling the queue when it runs dry. */
+  async waveNext(playedId, playedSeconds) {
+    if (!this.connected) return { ok: false, error: 'Аккаунт не подключён' };
+    if (playedId) {
+      this._waveFeedback('trackFinished', {
+        trackId: String(playedId),
+        totalPlayedSeconds: Math.max(0, Math.round(playedSeconds || 0)),
+      });
+    }
+    if (!this.wave.queue.length) {
+      try {
+        await this._waveFetch(playedId || undefined);
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    }
+    return this.waveTake();
+  }
+
+  waveTake() {
+    const track = this.wave.queue.shift();
+    if (!track) return { ok: false, error: 'Волна закончилась' };
+    this._waveFeedback('trackStarted', { trackId: track.id });
+    return { ok: true, track };
   }
 
   /** Track search for the panel's own search box. */

@@ -1110,9 +1110,12 @@ body.no-media #open-player {
 }
 
 body.no-media #seek,
-body.no-media #controls,
 body.no-media #reactions,
-body.no-media #vol {
+body.no-media #vol,
+body.no-media #prev,
+body.no-media #next,
+body.no-media #shuffle,
+body.no-media #repeat {
   display: none;
 }
 

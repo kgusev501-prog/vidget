@@ -295,9 +295,10 @@ function applyState(s) {
       artState.smtc = null;
       useCover(lastTrack.cover);
     } else {
-      setText(titleBox, 'Ничего не играет');
-      setText(artistBox, '');
+      setText(titleBox, 'Моя волна');
+      setText(artistBox, 'нажмите ▶, чтобы включить');
       appBox.textContent = '';
+      $('#art-letter').textContent = '♫';
       artBox.classList.remove('has-art');
       artBox.style.backgroundImage = '';
     }
@@ -334,7 +335,18 @@ function applyState(s) {
     setText(artistBox, s.artist || '');
     $('#art-letter').textContent = (s.title || '♫').trim().charAt(0).toUpperCase() || '♫';
   }
-  appBox.textContent = APP_NAMES[s.app] || s.app || '';
+  const ours = s.app === 'com.vidget.overlay' || s.app === 'electron.exe';
+  appBox.textContent = ours && wave.on ? 'Моя волна' : APP_NAMES[s.app] || s.app || '';
+
+  // Without a Yandex sign-in the embedded player stops a track early; say so
+  // once instead of leaving the wave to look broken.
+  if (ours && wave.on && s.status !== 'Playing' && !yaStatus.web && !wave.warned) {
+    const expected = (wave.current && wave.current.durationMs) || 0;
+    if (expected && wave.playedMs < expected - 5000) {
+      wave.warned = true;
+      toast('Трек обрывается: войдите в Яндекс Музыку, чтобы слушать целиком');
+    }
+  }
   updateButtons();
 }
 
@@ -343,7 +355,7 @@ function updateButtons() {
   const playing = mediaState.status === 'Playing';
   const play = $('#play');
   $('#play-use').setAttribute('href', playing ? '#i-pause' : '#i-play');
-  play.disabled = !mediaState.active && !lastTrack;
+  play.disabled = !mediaState.active && !lastTrack && !yaStatus.connected;
   $('#prev').disabled = !can.prev;
   $('#next').disabled = !can.next;
 
@@ -382,6 +394,15 @@ function setSeek(pos, dur) {
 }
 
 setInterval(() => {
+  // The wave advances on time actually played, whether or not the panel is open.
+  if (wave.on && wave.current && wave.current.durationMs && mediaState.status === 'Playing') {
+    const ours = mediaState.app === 'com.vidget.overlay' || mediaState.app === 'electron.exe';
+    if (ours) {
+      wave.playedMs += 250;
+      if (wave.playedMs >= wave.current.durationMs - 400) advanceWave();
+    }
+  }
+
   if (!isOpen || seekDrag || activeTab !== 'music') return;
   const dur = clock.duration;
   setSeek(Math.min(currentPos(), dur || Infinity), dur);
@@ -402,8 +423,10 @@ $('#open-player').addEventListener('click', async () => {
 });
 
 $('#play').addEventListener('click', () => {
-  // Nothing is sounding, but the widget remembers what played last.
-  if (!mediaState.active && lastTrack) return resumeLastTrack();
+  if (!mediaState.active) {
+    // An unfinished track gets picked up first; after it the wave takes over.
+    return lastTrack ? resumeLastTrack() : startWave();
+  }
   api.media.cmd('playpause');
 });
 
@@ -431,7 +454,10 @@ async function resumeLastTrack() {
   const query = [lastTrack.artists, lastTrack.title].filter(Boolean).join(' ');
   const res = await api.ya.searchTracks(query);
   const hit = res && res.ok && res.items[0];
-  if (!hit || !hit.albumId) return toast('Не удалось найти этот трек');
+  if (!hit || !hit.albumId) {
+    toast('Трек не найден, включаем волну');
+    return startWave();
+  }
 
   rememberTrack({ id: hit.id, albumId: hit.albumId, cover: hit.cover });
   playTrack(lastTrack);
@@ -758,6 +784,38 @@ function showTrackResults(on) {
 
 const ymEngine = $('#ym-engine');
 
+// Anything the widget starts rolls on into Моя волна when it ends.
+// playedMs counts only time actually sounding, so a pause does not creep the
+// track towards its end and skip it.
+const wave = { on: false, current: null, playedMs: 0, busy: false, warned: false };
+
+/** Hands the wave the track that just finished and starts the next one. */
+async function advanceWave() {
+  if (wave.busy || !wave.on) return;
+  wave.busy = true;
+
+  const played = wave.playedMs / 1000;
+  const res = await api.ya.waveNext(wave.current && wave.current.id, played);
+  wave.busy = false;
+
+  if (!res || !res.ok) {
+    wave.on = false;
+    return toast((res && res.error) || 'Волна остановилась');
+  }
+  playTrack(res.track);
+}
+
+async function startWave() {
+  if (!yaStatus.connected) {
+    toast('Сначала подключите аккаунт Яндекса');
+    return openYa();
+  }
+  toast('Включаем Мою волну…');
+  const res = await api.ya.waveStart();
+  if (!res || !res.ok) return toast((res && res.error) || 'Не удалось включить волну');
+  playTrack(res.track);
+}
+
 /**
  * Plays the chosen track and returns the panel to its usual controls.
  *
@@ -766,7 +824,7 @@ const ymEngine = $('#ym-engine');
  * click, so it cannot start anything by itself. The embed registers a Windows
  * media session, which is how the buttons above keep working.
  */
-async function playTrack(track) {
+function playTrack(track) {
   showMusicPane('player');
 
   if (!track.albumId) {
@@ -774,6 +832,11 @@ async function playTrack(track) {
     api.ya.play(track.id, track.albumId);
     return;
   }
+
+  // Everything the widget plays becomes the start of a wave.
+  wave.on = true;
+  wave.current = track;
+  wave.playedMs = 0;
 
   lastTrack = {
     id: track.id,

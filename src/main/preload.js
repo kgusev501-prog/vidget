@@ -58,6 +58,8 @@ contextBridge.exposeInMainWorld('vidget', {
     connect: (token) => ipcRenderer.invoke('ya:connect', token),
     disconnect: () => ipcRenderer.invoke('ya:disconnect'),
     searchTracks: (query) => ipcRenderer.invoke('ya:search', query),
+    waveStart: () => ipcRenderer.invoke('ya:wave-start'),
+    waveNext: (playedId, playedSeconds) => ipcRenderer.invoke('ya:wave-next', { playedId, playedSeconds }),
     play: (id, albumId) => ipcRenderer.invoke('ya:play', { id, albumId }),
     like: () => ipcRenderer.invoke('ya:like'),
     dislike: () => ipcRenderer.invoke('ya:dislike'),

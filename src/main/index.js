@@ -520,6 +520,10 @@ function registerIpc() {
     return { ...yandex.status(), web: false };
   });
   ipcMain.handle('ya:search', (_e, query) => yandex.searchTracks(query));
+  ipcMain.handle('ya:wave-start', () => yandex.waveStart());
+  ipcMain.handle('ya:wave-next', (_e, { playedId, playedSeconds } = {}) =>
+    yandex.waveNext(playedId, playedSeconds)
+  );
   ipcMain.handle('ya:play', async (_e, { id, albumId } = {}) => {
     if (!/^\d{1,15}$/.test(String(id || ''))) return { ok: false };
     // The desktop player registers yandexmusic:// and routes it like the site.
