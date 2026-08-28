@@ -395,11 +395,19 @@ function setSeek(pos, dur) {
 
 setInterval(() => {
   // The wave advances on time actually played, whether or not the panel is open.
-  if (wave.on && wave.current && wave.current.durationMs && mediaState.status === 'Playing') {
-    const ours = mediaState.app === 'com.vidget.overlay' || mediaState.app === 'electron.exe';
-    if (ours) {
+  if (wave.on) {
+    const ours = playingHere();
+    if (ours && mediaState.status === 'Playing') {
       wave.playedMs += 250;
-      if (wave.playedMs >= wave.current.durationMs - 400) advanceWave();
+      wave.silentMs = 0;
+      const total = wave.current && wave.current.durationMs;
+      if (total && wave.playedMs >= total - 400) advanceWave();
+    } else if (wave.playedMs > 4000 && !wave.userPaused && (!mediaState.active || ours)) {
+      // Our player went quiet by itself: the track is over, or the embed cut it
+      // short. Either way the wave should move on — but not while another app
+      // has taken over the sound, and not when the pause was asked for.
+      wave.silentMs += 250;
+      if (wave.silentMs >= 2500) advanceWave();
     }
   }
 
@@ -427,6 +435,8 @@ $('#play').addEventListener('click', () => {
     // An unfinished track gets picked up first; after it the wave takes over.
     return lastTrack ? resumeLastTrack() : startWave();
   }
+  // A pause asked for by hand must not read as the track having ended.
+  if (wave.on && playingHere()) wave.userPaused = mediaState.status === 'Playing';
   api.media.cmd('playpause');
 });
 
@@ -787,7 +797,10 @@ const ymEngine = $('#ym-engine');
 // Anything the widget starts rolls on into Моя волна when it ends.
 // playedMs counts only time actually sounding, so a pause does not creep the
 // track towards its end and skip it.
-const wave = { on: false, current: null, playedMs: 0, busy: false, warned: false };
+const wave = { on: false, current: null, playedMs: 0, silentMs: 0, userPaused: false, busy: false, warned: false };
+
+const playingHere = () =>
+  mediaState.active && (mediaState.app === 'com.vidget.overlay' || mediaState.app === 'electron.exe');
 
 /** Hands the wave the track that just finished and starts the next one. */
 async function advanceWave() {
@@ -837,6 +850,8 @@ function playTrack(track) {
   wave.on = true;
   wave.current = track;
   wave.playedMs = 0;
+  wave.silentMs = 0;
+  wave.userPaused = false;
 
   lastTrack = {
     id: track.id,
@@ -844,6 +859,7 @@ function playTrack(track) {
     title: track.title,
     artists: track.artists,
     cover: track.cover || null,
+    durationMs: track.durationMs || 0,
   };
   api.app.setSetting('lastTrack', lastTrack);
 

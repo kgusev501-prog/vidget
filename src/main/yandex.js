@@ -379,6 +379,7 @@ class YandexMusic extends EventEmitter {
         title: t.title + (t.version ? ` (${t.version})` : ''),
         artists: (t.artists || []).map((a) => a.name).join(', '),
         duration: t.durationMs ? mmss(t.durationMs) : '',
+        durationMs: t.durationMs || 0,
         cover: coverUrl(t.coverUri || (album && album.coverUri), '100x100'),
         liked: this.liked.has(id),
       };
