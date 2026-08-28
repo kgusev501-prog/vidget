@@ -8,6 +8,7 @@ const { EventEmitter } = require('events');
 const { clipboard, nativeImage } = require('electron');
 
 const { runPs, spawnPs } = require('./ps');
+const { classify } = require('../shared/classify');
 
 const MAX_ITEMS = 300;
 const MAX_IMAGES = 60;
@@ -24,14 +25,6 @@ const asArray = (v) => (Array.isArray(v) ? v : v ? [v] : []);
 
 const hash = (buf) => crypto.createHash('sha1').update(buf).digest('hex');
 
-function classify(text) {
-  const t = text.trim();
-  if (/^(https?:\/\/|www\.)\S+$/i.test(t) && !/\s/.test(t)) return 'url';
-  if (/^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(t)) return 'color';
-  if (/^[\w.+-]+@[\w-]+\.[\w.]+$/.test(t)) return 'email';
-  if (/^[A-Za-z]:\\|^\\\\/.test(t) && t.length < 260 && !t.includes('\n')) return 'path';
-  return 'text';
-}
 
 /**
  * Polls the system clipboard and keeps a de-duplicated history of text and

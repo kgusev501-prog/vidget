@@ -356,8 +356,11 @@ function updateButtons() {
   const play = $('#play');
   $('#play-use').setAttribute('href', playing ? '#i-pause' : '#i-play');
   play.disabled = !mediaState.active && !lastTrack && !yaStatus.connected;
-  $('#prev').disabled = !can.prev;
-  $('#next').disabled = !can.next;
+  // While the wave runs, skipping is ours to do regardless of what the system
+  // session reports — the embedded player exposes neither next nor previous.
+  const steering = wave.on && playingHere();
+  $('#prev').disabled = !can.prev && !(steering && wave.history.length);
+  $('#next').disabled = !can.next && !steering;
 
   // Yandex Music does not hand Windows any shuffle or repeat control, and a
   // button that can never do anything is worse than no button: hide those the
@@ -472,8 +475,23 @@ async function resumeLastTrack() {
   rememberTrack({ id: hit.id, albumId: hit.albumId, cover: hit.cover });
   playTrack(lastTrack);
 }
-$('#next').addEventListener('click', () => api.media.cmd('next'));
-$('#prev').addEventListener('click', () => api.media.cmd('prev'));
+// The wave is ours to steer: Windows has no next/previous to offer for the
+// embedded player, so these drive the queue directly.
+$('#next').addEventListener('click', () => {
+  if (wave.on && playingHere()) return advanceWave();
+  api.media.cmd('next');
+});
+
+$('#prev').addEventListener('click', () => {
+  if (wave.on && playingHere() && wave.history.length) {
+    const back = wave.history.pop();
+    const keep = wave.history.slice();
+    playTrack(back);
+    wave.history = keep; // playTrack would otherwise re-add the track we left
+    return;
+  }
+  api.media.cmd('prev');
+});
 $('#shuffle').addEventListener('click', () => api.media.cmd('shuffle', !mediaState.shuffle));
 $('#repeat').addEventListener('click', () => {
   const order = { None: 'List', List: 'Track', Track: 'None' };
@@ -797,7 +815,7 @@ const ymEngine = $('#ym-engine');
 // Anything the widget starts rolls on into Моя волна when it ends.
 // playedMs counts only time actually sounding, so a pause does not creep the
 // track towards its end and skip it.
-const wave = { on: false, current: null, playedMs: 0, silentMs: 0, userPaused: false, busy: false, warned: false };
+const wave = { on: false, current: null, history: [], playedMs: 0, silentMs: 0, userPaused: false, busy: false, warned: false };
 
 const playingHere = () =>
   mediaState.active && (mediaState.app === 'com.vidget.overlay' || mediaState.app === 'electron.exe');
@@ -847,6 +865,10 @@ function playTrack(track) {
   }
 
   // Everything the widget plays becomes the start of a wave.
+  if (wave.current && wave.current.id !== track.id) {
+    wave.history.push(wave.current);
+    if (wave.history.length > 20) wave.history.shift();
+  }
   wave.on = true;
   wave.current = track;
   wave.playedMs = 0;
@@ -1388,6 +1410,13 @@ $('#yt-go').addEventListener('click', runYtSearch);
 
 // --- the embedded player ---------------------------------------------------
 function playYt(item) {
+  if (!ytOrigin) {
+    // The embed refuses to run without a real origin, and the panel only has
+    // one while the local address is up.
+    toast('Локальный адрес недоступен — открываю в браузере');
+    api.yt.open(item.id);
+    return;
+  }
   ytCurrent = item;
   stopYtFrame();
 

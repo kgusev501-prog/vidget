@@ -2,6 +2,9 @@
 
 const { EventEmitter } = require('events');
 
+const { mmss, coverUrl, norm } = require('../shared/format');
+const { pickBestTrack } = require('../shared/match-track');
+
 // The desktop client talks to this host; the like/dislike routes below are the
 // ones it calls itself.
 const API = 'https://api.music.yandex.net';
@@ -14,20 +17,6 @@ const LIKES_TTL = 10 * 60 * 1000;
 // "Моя волна" is a rotor station; the API hands out a few tracks at a time and
 // expects to hear back which of them were played.
 const STATION = 'user:onyourwave';
-
-const mmss = (ms) => {
-  const total = Math.round((ms || 0) / 1000);
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
-};
-
-const coverUrl = (uri, size) => (uri ? `https://${uri.replace('%%', size)}` : null);
-
-const norm = (s) =>
-  (s || '')
-    .toLowerCase()
-    .replace(/ё/g, 'е')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
 
 /**
  * Likes and dislikes for the track SMTC says is playing.
@@ -233,6 +222,8 @@ class YandexMusic extends EventEmitter {
       this.error = err.message;
       this._pushStatus();
     }
+    // A long listening session would otherwise remember every track forever.
+    if (this.tracks.size > 500) this.tracks.clear();
     this.tracks.set(key, hit);
     if (this.current.key !== key) return; // track moved on while we searched
     this._apply(hit);
@@ -243,29 +234,11 @@ class YandexMusic extends EventEmitter {
     const body = await this._req('/search', {
       query: { type: 'track', page: 0, nocorrect: false, text },
     });
-    const results = (body && body.result && body.result.tracks && body.result.tracks.results) || [];
-    if (!results.length) return null;
+    const results = body?.result?.tracks?.results || [];
 
-    const wantTitle = norm(title);
-    const wantArtist = norm(artist);
+    const best = pickBestTrack(results, artist, title);
+    if (!best) return null;
 
-    // Search is fuzzy; prefer a result whose title and artist both line up.
-    let best = null;
-    let bestScore = -1;
-    for (const t of results.slice(0, 8)) {
-      const gotTitle = norm(t.title);
-      const gotArtists = (t.artists || []).map((a) => norm(a.name)).join(' ');
-      let score = 0;
-      if (gotTitle === wantTitle) score += 3;
-      else if (gotTitle.includes(wantTitle) || wantTitle.includes(gotTitle)) score += 1;
-      if (wantArtist && gotArtists.includes(wantArtist)) score += 2;
-      else if (wantArtist && wantArtist.split(' ').some((w) => w.length > 3 && gotArtists.includes(w))) score += 1;
-      if (score > bestScore) {
-        bestScore = score;
-        best = t;
-      }
-    }
-    if (!best || bestScore < 2) return null;
     const album = best.albums && best.albums[0];
     return {
       id: String(best.id),

@@ -27,6 +27,14 @@ const TYPES = {
 function startServer() {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
+      // Bound to loopback already; refuse anything addressed by another name so
+      // a stray request from elsewhere cannot reach the panel's files.
+      const host = (req.headers.host || '').split(':')[0];
+      if (host !== '127.0.0.1' && host !== 'localhost') {
+        res.writeHead(403).end();
+        return;
+      }
+
       const url = new URL(req.url, 'http://127.0.0.1');
       const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
       const file = path.join(ROOT, rel);

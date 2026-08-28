@@ -9,7 +9,8 @@
     "icons": "node tools/make-icons.js",
     "dist": "electron-builder --win",
     "dist:portable": "electron-builder --win --dir -c.win.signAndEditExecutable=false",
-    "predist": "node tools/prepare-signtool.js"
+    "predist": "node tools/prepare-signtool.js",
+    "test": "node --test \"test/**/*.test.js\""
   },
   "author": "",
   "license": "MIT",
