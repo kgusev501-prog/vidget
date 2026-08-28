@@ -50,6 +50,7 @@ const { MediaBridge } = require('./media');
 const { ClipboardWatcher } = require('./clipboard');
 const { Notes } = require('./notes');
 const { YandexMusic } = require('./yandex');
+const yandexLogin = require('./yandex-login');
 const { Player } = require('./player');
 const { startServer } = require('./server');
 const youtube = require('./youtube');
@@ -490,17 +491,33 @@ function registerIpc() {
   ipcMain.handle('player:status', () => player.status());
   ipcMain.handle('player:launch', () => player.launch({ minimized: false }));
 
-  ipcMain.handle('ya:status', () => yandex.status());
+  ipcMain.handle('ya:status', async () => ({
+    ...yandex.status(),
+    web: await yandexLogin.hasWebSession(),
+  }));
+
+  // One button for both halves: the window's session gets the cookies that let
+  // the panel play a full track, and the redirect hands back the API token.
+  ipcMain.handle('ya:login', async () => {
+    const res = await yandexLogin.openLogin(win);
+    if (!res.ok) {
+      return { ...yandex.status(), web: await yandexLogin.hasWebSession(), cancelled: true };
+    }
+    const st = await yandex.connect(res.token);
+    saveToken(st.connected ? res.token : null);
+    return { ...st, web: await yandexLogin.hasWebSession() };
+  });
   ipcMain.handle('ya:track', () => yandex.trackState());
   ipcMain.handle('ya:connect', async (_e, token) => {
     const st = await yandex.connect(token);
     saveToken(st.connected ? (token || '').trim() : null);
-    return st;
+    return { ...st, web: await yandexLogin.hasWebSession() };
   });
-  ipcMain.handle('ya:disconnect', () => {
+  ipcMain.handle('ya:disconnect', async () => {
     saveToken(null);
     yandex.disconnect();
-    return yandex.status();
+    await yandexLogin.clearWebSession();
+    return { ...yandex.status(), web: false };
   });
   ipcMain.handle('ya:search', (_e, query) => yandex.searchTracks(query));
   ipcMain.handle('ya:play', async (_e, { id, albumId } = {}) => {

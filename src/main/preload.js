@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('vidget', {
   ya: {
     status: () => ipcRenderer.invoke('ya:status'),
     track: () => ipcRenderer.invoke('ya:track'),
+    login: () => ipcRenderer.invoke('ya:login'),
     connect: (token) => ipcRenderer.invoke('ya:connect', token),
     disconnect: () => ipcRenderer.invoke('ya:disconnect'),
     searchTracks: (query) => ipcRenderer.invoke('ya:search', query),

@@ -279,15 +279,29 @@ function currentPos() {
 
 function applyState(s) {
   mediaState = s || { active: false };
-  body.classList.toggle('no-media', !mediaState.active);
+  // With nothing sounding anywhere the panel still has something to offer, as
+  // long as the widget itself played something earlier.
+  body.classList.toggle('no-media', !mediaState.active && !lastTrack);
+
   if (!mediaState.active) {
-    setText(titleBox, 'Ничего не играет');
-    setText(artistBox, '');
-    appBox.textContent = '';
-    artBox.classList.remove('has-art');
-    artBox.style.backgroundImage = '';
     Object.assign(clock, { playing: false, duration: 0, anchorPos: 0, key: null });
     setSeek(0, 0);
+
+    if (lastTrack) {
+      setText(titleBox, lastTrack.title || 'Последний трек');
+      setText(artistBox, lastTrack.artists || '');
+      appBox.textContent = 'на паузе';
+      $('#art-letter').textContent = (lastTrack.title || '♫').trim().charAt(0).toUpperCase() || '♫';
+      artState.smtc = null;
+      artState.ya = lastTrack.cover || null;
+      paintArt();
+    } else {
+      setText(titleBox, 'Ничего не играет');
+      setText(artistBox, '');
+      appBox.textContent = '';
+      artBox.classList.remove('has-art');
+      artBox.style.backgroundImage = '';
+    }
     updateButtons();
     return;
   }
@@ -327,7 +341,7 @@ function updateButtons() {
   const playing = mediaState.status === 'Playing';
   const play = $('#play');
   $('#play-use').setAttribute('href', playing ? '#i-pause' : '#i-play');
-  play.disabled = !mediaState.active;
+  play.disabled = !mediaState.active && !lastTrack;
   $('#prev').disabled = !can.prev;
   $('#next').disabled = !can.next;
 
@@ -385,7 +399,11 @@ $('#open-player').addEventListener('click', async () => {
   }
 });
 
-$('#play').addEventListener('click', () => api.media.cmd('playpause'));
+$('#play').addEventListener('click', () => {
+  // Nothing is sounding, but the widget remembers what it played last.
+  if (!mediaState.active && lastTrack) return playTrack(lastTrack);
+  api.media.cmd('playpause');
+});
 $('#next').addEventListener('click', () => api.media.cmd('next'));
 $('#prev').addEventListener('click', () => api.media.cmd('prev'));
 $('#shuffle').addEventListener('click', () => api.media.cmd('shuffle', !mediaState.shuffle));
@@ -544,6 +562,7 @@ const dislikeBtn = $('#dislike');
 const yaPanel = $('#ya-auth');
 
 let yaStatus = { connected: false };
+let lastTrack = null;
 let yaTrack = { state: 'idle', liked: false, disliked: false };
 
 function paintReactions() {
@@ -601,6 +620,9 @@ function paintYaPanel() {
   $('#ya-connected').hidden = !yaStatus.connected;
   $('#ya-form').hidden = !!yaStatus.connected;
   $('#ya-login').textContent = yaStatus.login || 'аккаунт Яндекса';
+  $('#ya-web').textContent = yaStatus.web
+    ? 'Треки играют в панели целиком.'
+    : 'Вход в плеер не выполнен — трек в панели оборвётся примерно через сорок секунд. Нажмите «Отключить аккаунт» и войдите заново, чтобы это починить.';
   $('#m-ya').textContent = yaStatus.connected ? 'подключено' : 'не подключено';
 }
 
@@ -641,6 +663,19 @@ async function saveYaToken() {
     yaMsg(yaStatus.error || 'Не удалось подключиться', 'bad');
   }
 }
+
+$('#ya-login-btn').addEventListener('click', async () => {
+  const btn = $('#ya-login-btn');
+  btn.disabled = true;
+  yaMsg('Ждём окно входа…');
+  yaStatus = await api.ya.login();
+  btn.disabled = false;
+  paintYaPanel();
+  paintReactions();
+  if (yaStatus.connected) yaMsg(`Готово — ${yaStatus.login || 'аккаунт подключён'}`, 'good');
+  else if (yaStatus.cancelled) yaMsg('Вход отменён');
+  else yaMsg(yaStatus.error || 'Не удалось войти', 'bad');
+});
 
 $('#ya-back').addEventListener('click', closeYa);
 $('#ya-open').addEventListener('click', () => api.ya.openAuth());
@@ -692,6 +727,15 @@ async function playTrack(track) {
     api.ya.play(track.id, track.albumId);
     return;
   }
+
+  lastTrack = {
+    id: track.id,
+    albumId: track.albumId,
+    title: track.title,
+    artists: track.artists,
+    cover: track.cover || null,
+  };
+  api.app.setSetting('lastTrack', lastTrack);
 
   api.media.cmd('pause'); // do not let the desktop player talk over it
   ymEngine.textContent = '';
@@ -1417,6 +1461,7 @@ async function refreshAll() {
 (async function boot() {
   ytOrigin = await api.yt.origin();
   const s = await api.app.settings();
+  lastTrack = s.lastTrack || null;
   applyTabOrder(s.tabOrder);
   selectTab(s.tab || 'music');
   paintVolume();

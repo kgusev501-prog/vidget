@@ -186,19 +186,28 @@
           <div id="ya-body">
             <div id="ya-connected" hidden>
               <p class="lead">Подключено как <b id="ya-login"></b>.</p>
+              <p id="ya-web" class="note"></p>
               <button id="ya-forget" class="btn ghost">Отключить аккаунт</button>
             </div>
             <div id="ya-form">
-              <ol class="steps">
-                <li>Откройте страницу входа Яндекса и войдите в свой аккаунт.</li>
-                <li>После входа браузер попадёт на адрес с <code>#access_token=…</code> — скопируйте значение токена из адресной строки.</li>
-                <li>Вставьте его сюда. Токен хранится на этом компьютере в зашифрованном виде.</li>
-              </ol>
+              <p class="lead">Вход нужен, чтобы ставить лайки, искать треки и слушать их целиком прямо в панели.</p>
               <div class="ya-row">
-                <button id="ya-open" class="btn ghost">Открыть страницу входа</button>
-                <input id="ya-token" type="password" placeholder="Вставьте access_token" spellcheck="false" />
-                <button id="ya-save" class="btn">Подключить</button>
+                <button id="ya-login-btn" class="btn">Войти в Яндекс Музыку</button>
               </div>
+              <p class="note">Откроется обычное окно входа Яндекса. Пароль нигде не сохраняется — виджет запоминает только сессию и ключ доступа, зашифрованный средствами Windows.</p>
+              <details id="ya-manual">
+                <summary>Ввести ключ вручную</summary>
+                <ol class="steps">
+                  <li>Откройте страницу входа и войдите в аккаунт.</li>
+                  <li>Скопируйте из адресной строки значение <code>access_token</code> — можно и весь адрес целиком.</li>
+                  <li>Вставьте сюда.</li>
+                </ol>
+                <div class="ya-row">
+                  <button id="ya-open" class="btn ghost">Страница входа</button>
+                  <input id="ya-token" type="password" placeholder="Вставьте access_token" spellcheck="false" />
+                  <button id="ya-save" class="btn">Подключить</button>
+                </div>
+              </details>
             </div>
             <div id="ya-msg"></div>
           </div>
