@@ -21,6 +21,13 @@ const MAX_TEXT = 200000;
 const MAX_FILES = 60;
 const THUMB_H = 160;
 
+// Anything longer than this goes to a file of its own. The index is rewritten
+// whole on every copy, so a few long pastes sitting inside it would make every
+// later copy pay for them: three hundred entries at the length limit come to
+// 57 MB of JSON to build and write, each time. Below the threshold the text
+// stays inline, where it costs nothing and saves a file per copy.
+const TEXT_ON_DISK = 16384;
+
 // Copied files live on the clipboard as CF_HDROP. Electron reports the format
 // as text/uri-list and returns only the first path, so the full list and any
 // write-back go through a short PowerShell call.
@@ -51,6 +58,8 @@ class ClipboardWatcher extends EventEmitter {
     super();
     this.store = store;
     this.imageDir = imageDir;
+    // Long pastes live beside the pictures, one file each.
+    this.textDir = path.join(path.dirname(imageDir), 'texts');
     this.options = options; // read fresh each time, so a change takes effect at once
     this.timer = null;
     this.lastSig = null;
@@ -270,18 +279,52 @@ class ClipboardWatcher extends EventEmitter {
 
   _addText(text, sig) {
     const lines = text.split('\n');
-    this._push({
-      id: sig.slice(2, 14) + Date.now().toString(36),
+    const id = sig.slice(2, 14) + Date.now().toString(36);
+
+    const entry = {
+      id,
       sig,
       type: 'text',
       kind: classify(text),
-      text,
       preview: lines.slice(0, 6).join('\n').slice(0, 400),
       chars: text.length,
       lines: lines.length,
       ts: Date.now(),
       pinned: false,
-    });
+    };
+
+    // A long paste is kept as a file and fetched only when something asks for
+    // it — the same bargain as a picture. Short ones stay where they are.
+    if (text.length > TEXT_ON_DISK && this._writeText(id, text)) entry.onDisk = true;
+    else entry.text = text;
+
+    this._push(entry);
+  }
+
+  _textFile(id) {
+    return path.join(this.textDir, `${id}.txt`);
+  }
+
+  /** @returns {boolean} whether the text made it to disk */
+  _writeText(id, text) {
+    try {
+      fs.mkdirSync(this.textDir, { recursive: true });
+      fs.writeFileSync(this._textFile(id), text, 'utf8');
+      return true;
+    } catch (err) {
+      console.error('[clipboard] long text stays in the index:', err.message);
+      return false;
+    }
+  }
+
+  /** The whole text, wherever it happens to live. */
+  async _readText(item) {
+    if (!item.onDisk) return item.text || '';
+    try {
+      return await fs.promises.readFile(this._textFile(item.id), 'utf8');
+    } catch {
+      return item.preview || '';
+    }
   }
 
   /**
@@ -384,13 +427,24 @@ class ClipboardWatcher extends EventEmitter {
   }
 
   _unlink(item) {
-    if (item.type !== 'image') return;
-    this.images.remove(item.id);
+    if (item.type === 'image') return this.images.remove(item.id);
+    if (item.onDisk) fs.rm(this._textFile(item.id), { force: true }, () => {});
   }
 
+  /** Files left behind by entries that are no longer in the history. */
   _pruneOrphans() {
-    const known = new Set(this.items.filter((i) => i.type === 'image').map((i) => i.id));
-    this.images.pruneOrphans(known);
+    this.images.pruneOrphans(new Set(this.items.filter((i) => i.type === 'image').map((i) => i.id)));
+
+    const keep = new Set(this.items.filter((i) => i.onDisk).map((i) => `${i.id}.txt`));
+    let files;
+    try {
+      files = fs.readdirSync(this.textDir);
+    } catch {
+      return; // no folder yet, so nothing to tidy
+    }
+    for (const name of files) {
+      if (!keep.has(name)) fs.rm(path.join(this.textDir, name), { force: true }, () => {});
+    }
   }
 
   /** Put an entry back on the clipboard without re-recording it. */
@@ -427,7 +481,7 @@ class ClipboardWatcher extends EventEmitter {
         return false;
       }
     } else {
-      clipboard.writeText(item.text);
+      clipboard.writeText(await this._readText(item));
     }
     this.lastSig = item.sig;
     this._bump(item);
@@ -526,7 +580,7 @@ class ClipboardWatcher extends EventEmitter {
   full(id) {
     const item = this.items.find((i) => i.id === id);
     if (!item) return null;
-    if (item.type === 'text') return { type: 'text', text: item.text };
+    if (item.type === 'text') return this._readText(item).then((text) => ({ type: 'text', text }));
     if (item.type === 'files') return { type: 'files', files: item.files };
     if (item.pending) return { type: 'image', pending: true, w: item.w, h: item.h };
     return {
