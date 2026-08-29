@@ -16,6 +16,13 @@ module.exports = {
     icon: 'assets/icon-256.png',
   },
   nsis: {
+    // No spaces in the file name. electron-updater asks GitHub for the
+    // installer with every space turned into a hyphen, while GitHub itself
+    // renames uploaded assets by turning spaces into dots — so a name with
+    // spaces in it is requested at one address and stored at another, and the
+    // download fails after the update has already been found. A name that has
+    // no spaces to begin with survives both.
+    artifactName: '${productName}-Setup-${version}.${ext}',
     oneClick: false,
     perMachine: false,
     allowToChangeInstallationDirectory: true,

@@ -175,7 +175,7 @@ Electron стартует как обычный Node и падает.
 ## Установка
 
 ```bash
-npm run dist        # соберёт dist\Vidget Setup 0.1.0.exe
+npm run dist        # соберёт dist\Vidget-Setup-0.1.1.exe
 ```
 
 Запустите установщик двойным кликом. Прав администратора он не просит — ставится
@@ -192,7 +192,7 @@ npm run dist        # соберёт dist\Vidget Setup 0.1.0.exe
 ## Сборка
 
 ```bash
-npm run dist            # dist\Vidget Setup 0.1.0.exe — установщик NSIS
+npm run dist            # dist\Vidget-Setup-0.1.1.exe — установщик NSIS
 npm run dist:portable   # dist\win-unpacked\ — папка без установки
 ```
 
@@ -212,8 +212,8 @@ VIDGET_UPDATE_URL=https://ваш-сайт/vidget/ npm run dist
 1. Поднимите номер версии в `package.json` — по нему виджет и понимает, что
    вышло что-то новее. Без этого шага обновление не заметят.
 2. Соберите: `npm run dist`. В папке `dist` появятся три файла:
-   - `Vidget Setup X.Y.Z.exe` — установщик;
-   - `Vidget Setup X.Y.Z.exe.blockmap` — карта блоков, по ней обновление
+   - `Vidget-Setup-X.Y.Z.exe` — установщик;
+   - `Vidget-Setup-X.Y.Z.exe.blockmap` — карта блоков, по ней обновление
      докачивает только изменившееся вместо всех 78 МБ;
    - `latest.yml` — описание версии, по нему виджет узнаёт о новой сборке.
 3. Выложите все три в релиз на GitHub — вручную или командой.
