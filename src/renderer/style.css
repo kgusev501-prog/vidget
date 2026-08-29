@@ -355,11 +355,21 @@ body.open #panel {
 
 .scroller > span {
   display: inline-block;
-  will-change: transform;
 }
 
-.scroller.marquee > span {
+/* Only while the shade is actually open. GPU compositing is off for this
+   window, so every frame of this is drawn by the processor — and it used to
+   keep drifting behind a closed shade nobody was looking at, for 5-6% of a
+   core, forever. */
+body.open .scroller.marquee > span {
+  will-change: transform;
   animation: drift 15s linear infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.open .scroller.marquee > span {
+    animation: none;
+  }
 }
 
 @keyframes drift {

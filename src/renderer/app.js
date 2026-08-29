@@ -1087,7 +1087,7 @@ function renderClips() {
       chip.append(list);
     } else if (it.type === 'image') {
       const shot = el('div', 'shot');
-      if (it.thumb) shot.style.backgroundImage = `url("${it.thumb}")`;
+      if (it.thumbUrl) shot.style.backgroundImage = `url("${it.thumbUrl}")`;
       chip.append(shot);
     } else if (it.kind === 'color') {
       const sw = el('div', 'swatch');
@@ -1166,10 +1166,18 @@ async function showPreview(id) {
     }
     $('#pv-meta').textContent = plural(data.files.length, 'объект', 'объекта', 'объектов');
   } else if (data.type === 'image') {
-    const img = el('img');
-    img.src = data.dataUrl;
-    bodyEl.append(img);
-    $('#pv-meta').textContent = `${data.w}×${data.h} · ${humanBytes(data.bytes || 0)}`;
+    if (data.pending) {
+      // The picture is still being written; it is only ever a moment.
+      bodyEl.textContent = 'Сохраняем картинку…';
+      $('#pv-meta').textContent = `${data.w}×${data.h}`;
+    } else {
+      // Loaded by address from our own origin, so the bytes never travel
+      // through IPC as a base64 string.
+      const img = el('img');
+      img.src = data.url;
+      bodyEl.append(img);
+      $('#pv-meta').textContent = `${data.w}×${data.h} · ${humanBytes(data.bytes || 0)}`;
+    }
   } else {
     bodyEl.textContent = data.text;
     $('#pv-meta').textContent = `${data.text.length} символов`;

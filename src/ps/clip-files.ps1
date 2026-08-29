@@ -7,6 +7,8 @@
 #  same file look identical from there, so detection lives here as well.
 #
 #    -Mode watch                  -> one JSON line per change (long lived)
+#                                    {"type":"seq"} on every clipboard write,
+#                                    {"type":"files"} when it holds a file list
 #    -Mode read                   -> {"paths":[...]}
 #    -Mode write -ListFile x.json -> {"ok":true,"count":n}
 # ============================================================================
@@ -47,13 +49,21 @@ public static class ClipSeq {
 }
 "@
         $last = [ClipSeq]::GetClipboardSequenceNumber()
-        Emit @{ type = 'ready' }
+        # Hand over the current number straight away: until the app has one it
+        # has to assume the clipboard may have changed and read it on every
+        # tick, which is exactly the work this whole signal exists to avoid.
+        Emit @{ type = 'ready'; n = [double]$last }
 
         while ($true) {
             Start-Sleep -Milliseconds 350
             $seq = [ClipSeq]::GetClipboardSequenceNumber()
             if ($seq -eq $last) { continue }
             $last = $seq
+
+            # Tell the app the clipboard changed before looking at what is in
+            # it. Reading the contents costs real work, and without this signal
+            # the app has no way to know it can skip that work entirely.
+            Emit @{ type = 'seq'; n = [double]$seq }
 
             try {
                 $paths = Get-Paths

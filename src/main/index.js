@@ -370,15 +370,24 @@ if (!app.requestSingleInstanceLock()) {
 async function init() {
   app.setAppUserModelId('com.vidget.overlay');
 
-  web = await startServer();
+  const dir = app.getPath('userData');
+  const imageDir = path.join(dir, 'images');
+
+  // The panel is served over loopback, and so are clipboard pictures: that way
+  // the panel loads one by address instead of having its bytes copied across
+  // IPC as text.
+  web = await startServer({ clipImages: imageDir });
   if (!web) console.warn('[server] loopback port unavailable, YouTube tab will be limited');
 
-  const dir = app.getPath('userData');
   settings = new Store(dir, 'settings', {
     autostart: true,
     launchPlayer: false,
     keepImages: true,
     clipLimit: 300,
+    // Pictures are kept at full quality, so the history is bounded by disk
+    // rather than by a count: the oldest unpinned go once the folder outgrows
+    // this. 2 GB is roughly a few hundred screenshots.
+    imageBudget: 2 * 1024 * 1024 * 1024,
     updateUrl: '',
     hotkey: 'Control+Alt+Space',
     tab: 'music',
@@ -388,7 +397,8 @@ async function init() {
   stores = [settings, clipStore, noteStore];
 
   media = new MediaBridge();
-  clip = new ClipboardWatcher(clipStore, path.join(dir, 'images'), () => settings.get());
+  clip = new ClipboardWatcher(clipStore, imageDir, () => settings.get());
+  clip.setOrigin(web ? web.origin : null);
   notes = new Notes(noteStore);
   yandex = new YandexMusic();
   player = new Player();

@@ -8,13 +8,23 @@ const { EventEmitter } = require('events');
 const { clipboard, nativeImage } = require('electron');
 
 const { runPs, spawnPs } = require('./ps');
+const { ImageStore } = require('./image-store');
 const { classify } = require('../shared/classify');
+const { encode: encodePng, bgraToRgba } = require('../shared/png');
+const { planEviction, usage, DEFAULT_BUDGET } = require('../shared/image-budget');
 
 const MAX_ITEMS = 300;
-const MAX_IMAGES = 60;
+const MAX_IMAGES = 200; // a sanity cap; the byte budget is what really bounds it
 const POLL_MS = 450;
 const MAX_TEXT = 200000;
 const MAX_FILES = 60;
+const THUMB_H = 160;
+
+// A file selection can hold a hundred thousand paths. Metadata is read for the
+// ones that could plausibly be shown, and the rest are kept as paths — which is
+// all that restoring them to the clipboard needs anyway.
+const STAT_LIMIT = 200;
+const STAT_CHUNK = 50;
 
 // Copied files live on the clipboard as CF_HDROP. Electron reports the format
 // as text/uri-list and returns only the first path, so the full list and any
@@ -25,11 +35,21 @@ const asArray = (v) => (Array.isArray(v) ? v : v ? [v] : []);
 
 const hash = (buf) => crypto.createHash('sha1').update(buf).digest('hex');
 
+const idle = () => new Promise((r) => setImmediate(r));
 
 /**
  * Polls the system clipboard and keeps a de-duplicated history of text and
- * images. Images live as PNG files next to the JSON index; the index only
- * carries a small inline thumbnail so the renderer stays light.
+ * images.
+ *
+ * Windows announces every clipboard write through a sequence number, and the
+ * watcher below reports it. Nothing here reads the clipboard's contents until
+ * that number moves — reading a picture means decoding it, and doing that on a
+ * timer for a picture already seen is how a widget ends up holding a core at
+ * 100 % for as long as a screenshot sits in the clipboard.
+ *
+ * Pictures are kept as files at full quality and referred to by path. Only a
+ * small preview travels with the index; the picture itself is fetched when
+ * something actually needs it.
  */
 class ClipboardWatcher extends EventEmitter {
   constructor(store, imageDir, options = () => ({})) {
@@ -42,8 +62,15 @@ class ClipboardWatcher extends EventEmitter {
     this.suppressUntil = 0;
     this.watcher = null;
     this.watcherBuf = '';
-    this.watcherSeeded = false;
-    fs.mkdirSync(imageDir, { recursive: true });
+    this.origin = null; // loopback origin the panel is served from
+
+    // Gate on the clipboard sequence number. Until the watcher reports one,
+    // every tick reads — that is the old behaviour, and the right fallback if
+    // the watcher never comes up.
+    this.seq = null;
+    this.dirty = true;
+
+    this.images = new ImageStore(imageDir, (bitmap, w, h) => encodePng(bgraToRgba(bitmap), w, h, { level: 6 }));
     this._pruneOrphans();
   }
 
@@ -53,6 +80,16 @@ class ClipboardWatcher extends EventEmitter {
 
   set items(next) {
     this.store.set({ items: next });
+  }
+
+  /** The panel's origin, once the loopback server is up. */
+  setOrigin(origin) {
+    this.origin = origin || null;
+  }
+
+  get budget() {
+    const n = Number(this.options().imageBudget);
+    return Number.isFinite(n) && n > 0 ? n : DEFAULT_BUDGET;
   }
 
   start() {
@@ -66,12 +103,14 @@ class ClipboardWatcher extends EventEmitter {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this._stopWatcher();
+    this.images.stop();
     this.store.flush();
   }
 
-  // --- copied files -----------------------------------------------------
+  // --- the change signal -------------------------------------------------
   // Detection has to happen on the Windows side: Electron cannot tell two file
-  // selections apart when they begin with the same file.
+  // selections apart when they begin with the same file, and it has no way at
+  // all to ask whether the clipboard changed.
   _startWatcher() {
     if (this.watcher) return;
     try {
@@ -79,6 +118,7 @@ class ClipboardWatcher extends EventEmitter {
     } catch (err) {
       console.error('[clipboard] file watcher failed to start', err.message);
       this.watcher = null;
+      this.seq = null; // no signal: go back to reading on every tick
       return;
     }
 
@@ -89,6 +129,8 @@ class ClipboardWatcher extends EventEmitter {
 
     this.watcher.on('exit', (code) => {
       this.watcher = null;
+      this.seq = null;
+      this.dirty = true;
       if (!this.timer) return; // stopped on purpose
       console.warn('[clipfiles] watcher exited', code, '- restarting');
       setTimeout(() => this._startWatcher(), 2000);
@@ -119,13 +161,33 @@ class ClipboardWatcher extends EventEmitter {
       } catch {
         continue;
       }
+
+      if (msg.type === 'ready' || msg.type === 'seq') {
+        // Windows says the clipboard changed — the only thing that ever makes
+        // it worth looking at what is in it. The watcher's opening message
+        // carries the current number too, so the gate closes from the start
+        // rather than after the first copy; one read follows either way, in
+        // case something was copied while the watcher was still starting up.
+        if (msg.n != null) this.seq = msg.n;
+        this.dirty = true;
+        this._read(false);
+        continue;
+      }
+
       if (msg.type !== 'files') continue;
       if (Date.now() < this.suppressUntil) continue;
-      this._addFiles(asArray(msg.paths).filter(Boolean));
+      this._addFiles(asArray(msg.paths).filter(Boolean)).catch((err) =>
+        console.error('[clipboard] file list failed', err.message)
+      );
     }
   }
 
   _read(seedOnly) {
+    // Nothing has changed since the last look, and the watcher is the one
+    // telling us so. Reading again could only produce what we already have.
+    if (!seedOnly && this.seq !== null && !this.dirty) return;
+    this.dirty = false;
+
     let formats;
     try {
       formats = clipboard.availableFormats();
@@ -151,12 +213,24 @@ class ClipboardWatcher extends EventEmitter {
         return;
       }
       if (img.isEmpty()) return;
-      const png = img.toPNG();
-      const sig = `i:${hash(png)}`;
+
+      // The signature comes from a thumbnail, never from the full picture:
+      // encoding megapixels only to find out we have seen them before is the
+      // most expensive way possible to answer a cheap question.
+      const size = img.getSize();
+      let thumb;
+      try {
+        thumb = img.resize({ height: Math.min(THUMB_H, size.height), quality: 'good' });
+      } catch {
+        return;
+      }
+      const sig = `i:${size.width}x${size.height}:${hash(thumb.toBitmap())}`;
       if (sig === this.lastSig) return;
       this.lastSig = sig;
       if (seedOnly || Date.now() < this.suppressUntil) return;
-      this._addImage(img, png, sig);
+      this._addImage(img, thumb, size, sig).catch((err) =>
+        console.error('[clipboard] image failed', err.message)
+      );
       return;
     }
 
@@ -177,20 +251,30 @@ class ClipboardWatcher extends EventEmitter {
     this._addText(text, sig);
   }
 
-  _addFiles(paths) {
+  async _addFiles(paths) {
     if (!paths.length) return;
 
-    const files = paths.map((full) => {
+    // Metadata is read a chunk at a time with a breath in between, so a
+    // selection of a hundred thousand files cannot freeze the panel — or make
+    // the widget compete with Explorer for the disk while it is copying them.
+    const files = [];
+    for (let i = 0; i < paths.length; i++) {
+      const full = paths[i];
       const entry = { path: full, name: path.basename(full) || full, dir: false, size: 0 };
-      try {
-        const st = fs.statSync(full);
-        entry.dir = st.isDirectory();
-        entry.size = st.isDirectory() ? 0 : st.size;
-      } catch {
-        entry.missing = true;
+      if (i < STAT_LIMIT) {
+        try {
+          const st = await fs.promises.stat(full);
+          entry.dir = st.isDirectory();
+          entry.size = st.isDirectory() ? 0 : st.size;
+        } catch {
+          entry.missing = true;
+        }
+        if (i % STAT_CHUNK === STAT_CHUNK - 1) await idle();
+      } else {
+        entry.unread = true; // kept as a path; restoring needs nothing more
       }
-      return entry;
-    });
+      files.push(entry);
+    }
 
     const sig = `d:${hash(paths.join('\n'))}`;
     this._push({
@@ -220,36 +304,57 @@ class ClipboardWatcher extends EventEmitter {
     });
   }
 
-  _addImage(img, png, sig) {
-    const size = img.getSize();
-    const id = sig.slice(2, 14) + Date.now().toString(36);
-    const file = path.join(this.imageDir, `${id}.png`);
+  /**
+   * The entry appears at once with its preview; the full-quality file is
+   * written in the background and its size filled in when it lands.
+   */
+  async _addImage(img, thumb, size, sig) {
+    const id = hash(sig).slice(0, 12) + Date.now().toString(36);
+
     try {
-      fs.writeFileSync(file, png);
+      await this.images.saveThumb(id, thumb.toPNG());
     } catch (err) {
-      console.error('[clipboard] image write failed', err.message);
-      return;
+      console.error('[clipboard] thumbnail failed', err.message);
     }
-    let thumb = null;
-    try {
-      const scale = img.resize({ height: Math.min(160, size.height), quality: 'good' });
-      thumb = scale.toDataURL();
-    } catch {
-      /* thumbnail is optional */
-    }
+
     this._push({
       id,
       sig,
       type: 'image',
       kind: 'image',
-      file,
-      thumb,
+      file: this.images.file(id),
       w: size.width,
       h: size.height,
-      bytes: png.length,
+      bytes: 0,
+      pending: true,
       ts: Date.now(),
       pinned: false,
     });
+
+    let bytes = 0;
+    try {
+      bytes = await this.images.save(id, img.toBitmap(), size.width, size.height);
+    } catch (err) {
+      console.error('[clipboard] could not save the picture', err.message);
+      this.remove(id);
+      return;
+    }
+
+    this._patch(id, { bytes, pending: false });
+    this._enforceBudget();
+  }
+
+  /** Updates one entry in place, if it is still there. */
+  _patch(id, fields) {
+    let found = false;
+    const next = this.items.map((it) => {
+      if (it.id !== id) return it;
+      found = true;
+      return { ...it, ...fields };
+    });
+    if (!found) return;
+    this.items = next;
+    this.emit('change', next);
   }
 
   _push(entry) {
@@ -285,22 +390,27 @@ class ClipboardWatcher extends EventEmitter {
     return keep;
   }
 
+  /** Keeps the pictures folder inside its budget, oldest first, pinned safe. */
+  _enforceBudget() {
+    const { drop, total, kept } = planEviction(this.items, this.budget);
+    if (!drop.length) return;
+    const gone = new Set(drop.map((d) => d.id));
+    for (const item of drop) this._unlink(item);
+    this.items = this.items.filter((i) => !gone.has(i.id));
+    console.log(
+      `[clipboard] pictures ${Math.round(total / 1048576)} MB over budget, forgot ${drop.length} → ${Math.round(kept / 1048576)} MB`
+    );
+    this.emit('change', this.items);
+  }
+
   _unlink(item) {
-    if (item.type !== 'image' || !item.file) return;
-    fs.rm(item.file, { force: true }, () => {});
+    if (item.type !== 'image') return;
+    this.images.remove(item.id);
   }
 
   _pruneOrphans() {
-    const known = new Set(this.items.filter((i) => i.type === 'image').map((i) => path.basename(i.file || '')));
-    let files;
-    try {
-      files = fs.readdirSync(this.imageDir);
-    } catch {
-      return;
-    }
-    for (const f of files) {
-      if (!known.has(f)) fs.rm(path.join(this.imageDir, f), { force: true }, () => {});
-    }
+    const known = new Set(this.items.filter((i) => i.type === 'image').map((i) => i.id));
+    this.images.pruneOrphans(known);
   }
 
   /** Put an entry back on the clipboard without re-recording it. */
@@ -327,8 +437,12 @@ class ClipboardWatcher extends EventEmitter {
     }
 
     if (item.type === 'image') {
+      // Still being written; the pixels are not on disk yet.
+      if (item.pending) return false;
       try {
-        clipboard.writeImage(nativeImage.createFromPath(item.file));
+        const img = nativeImage.createFromPath(item.file);
+        if (img.isEmpty()) return false;
+        clipboard.writeImage(img);
       } catch {
         return false;
       }
@@ -366,7 +480,28 @@ class ClipboardWatcher extends EventEmitter {
     this.emit('change', this.items);
   }
 
-  /** Strip the index down for IPC: full image bytes never cross the wire. */
+  /** Bytes the pictures folder is holding, for the settings screen. */
+  imageUsage() {
+    return { bytes: usage(this.items), budget: this.budget };
+  }
+
+  // --- what the panel gets ----------------------------------------------
+  /**
+   * Addresses for a picture. Served over the loopback origin so the panel can
+   * load it like any other image; without a server there is no origin to serve
+   * from, and the bytes have to be inlined instead.
+   */
+  _imageUrl(name) {
+    if (this.origin) return `${this.origin}/clip/${name}`;
+    try {
+      const png = fs.readFileSync(path.join(this.imageDir, name));
+      return `data:image/png;base64,${png.toString('base64')}`;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Strips the index down for IPC: image bytes never cross the wire. */
   listForRenderer() {
     return this.items.map((i) =>
       i.type === 'files'
@@ -380,7 +515,18 @@ class ClipboardWatcher extends EventEmitter {
             pinned: i.pinned,
           }
         : i.type === 'image'
-        ? { id: i.id, type: i.type, kind: i.kind, thumb: i.thumb, w: i.w, h: i.h, bytes: i.bytes, ts: i.ts, pinned: i.pinned }
+        ? {
+            id: i.id,
+            type: i.type,
+            kind: i.kind,
+            thumbUrl: this._imageUrl(`${i.id}.thumb.png`),
+            w: i.w,
+            h: i.h,
+            bytes: i.bytes,
+            pending: !!i.pending,
+            ts: i.ts,
+            pinned: i.pinned,
+          }
         : {
             id: i.id,
             type: i.type,
@@ -394,24 +540,20 @@ class ClipboardWatcher extends EventEmitter {
     );
   }
 
-  /** Full payload for the preview pane; images come back as a data URL. */
+  /** Full payload for the preview pane; a picture comes back as an address. */
   full(id) {
     const item = this.items.find((i) => i.id === id);
     if (!item) return null;
     if (item.type === 'text') return { type: 'text', text: item.text };
     if (item.type === 'files') return { type: 'files', files: item.files };
-    try {
-      const png = fs.readFileSync(item.file);
-      return {
-        type: 'image',
-        dataUrl: `data:image/png;base64,${png.toString('base64')}`,
-        w: item.w,
-        h: item.h,
-        bytes: item.bytes,
-      };
-    } catch {
-      return null;
-    }
+    if (item.pending) return { type: 'image', pending: true, w: item.w, h: item.h };
+    return {
+      type: 'image',
+      url: this._imageUrl(`${item.id}.png`),
+      w: item.w,
+      h: item.h,
+      bytes: item.bytes,
+    };
   }
 }
 
