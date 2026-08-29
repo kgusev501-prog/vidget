@@ -1550,6 +1550,20 @@ async function paintSettings() {
   $('#set-clip-limit').value = String(s.clipLimit || 300);
   $('#set-update-url').value = s.updateUrl || '';
 
+  // Pictures are kept at full quality as files, so what bounds the history is
+  // disk rather than a count — worth showing what it is actually using.
+  const budget = Number(s.imageBudget) || 2147483648;
+  const picker = $('#set-image-budget');
+  if (!picker.querySelector(`option[value="${budget}"]`)) {
+    const extra = document.createElement('option');
+    extra.value = String(budget);
+    extra.textContent = `до ${humanBytes(budget)}`;
+    picker.append(extra);
+  }
+  picker.value = String(budget);
+  const used = (s.clipImages && s.clipImages.bytes) || 0;
+  $('#set-images-used').textContent = used ? `— занято ${humanBytes(used)}` : '— пока пусто';
+
   // The chosen combination may have been taken by another program, in which
   // case the widget picked a free one — show what is actually in force.
   const hotkey = s.hotkey || 'Control+Alt+Space';
@@ -1590,6 +1604,10 @@ $('#set-hotkey').addEventListener('change', async (e) => {
 $('#set-autostart').addEventListener('change', (e) => api.app.setSetting('autostart', e.target.checked));
 $('#set-launch').addEventListener('change', (e) => api.app.setSetting('launchPlayer', e.target.checked));
 $('#set-images').addEventListener('change', (e) => api.app.setSetting('keepImages', e.target.checked));
+$('#set-image-budget').addEventListener('change', async (e) => {
+  await api.app.setSetting('imageBudget', Number(e.target.value));
+  paintSettings();
+});
 $('#set-clip-limit').addEventListener('change', (e) =>
   api.app.setSetting('clipLimit', Number(e.target.value))
 );

@@ -10,6 +10,7 @@ const { clipboard, nativeImage } = require('electron');
 const { runPs, spawnPs } = require('./ps');
 const { ImageStore } = require('./image-store');
 const { classify } = require('../shared/classify');
+const { describe: describeFiles, STAT_LIMIT, STAT_CHUNK } = require('../shared/file-list');
 const { encode: encodePng, bgraToRgba } = require('../shared/png');
 const { planEviction, usage, DEFAULT_BUDGET } = require('../shared/image-budget');
 
@@ -19,12 +20,6 @@ const POLL_MS = 450;
 const MAX_TEXT = 200000;
 const MAX_FILES = 60;
 const THUMB_H = 160;
-
-// A file selection can hold a hundred thousand paths. Metadata is read for the
-// ones that could plausibly be shown, and the rest are kept as paths — which is
-// all that restoring them to the clipboard needs anyway.
-const STAT_LIMIT = 200;
-const STAT_CHUNK = 50;
 
 // Copied files live on the clipboard as CF_HDROP. Electron reports the format
 // as text/uri-list and returns only the first path, so the full list and any
@@ -254,27 +249,12 @@ class ClipboardWatcher extends EventEmitter {
   async _addFiles(paths) {
     if (!paths.length) return;
 
-    // Metadata is read a chunk at a time with a breath in between, so a
-    // selection of a hundred thousand files cannot freeze the panel — or make
-    // the widget compete with Explorer for the disk while it is copying them.
-    const files = [];
-    for (let i = 0; i < paths.length; i++) {
-      const full = paths[i];
-      const entry = { path: full, name: path.basename(full) || full, dir: false, size: 0 };
-      if (i < STAT_LIMIT) {
-        try {
-          const st = await fs.promises.stat(full);
-          entry.dir = st.isDirectory();
-          entry.size = st.isDirectory() ? 0 : st.size;
-        } catch {
-          entry.missing = true;
-        }
-        if (i % STAT_CHUNK === STAT_CHUNK - 1) await idle();
-      } else {
-        entry.unread = true; // kept as a path; restoring needs nothing more
-      }
-      files.push(entry);
-    }
+    const files = await describeFiles(paths, {
+      stat: (p) => fs.promises.stat(p),
+      breathe: idle,
+      limit: STAT_LIMIT,
+      chunk: STAT_CHUNK,
+    });
 
     const sig = `d:${hash(paths.join('\n'))}`;
     this._push({
@@ -341,7 +321,7 @@ class ClipboardWatcher extends EventEmitter {
     }
 
     this._patch(id, { bytes, pending: false });
-    this._enforceBudget();
+    this.sweepImages();
   }
 
   /** Updates one entry in place, if it is still there. */
@@ -391,7 +371,7 @@ class ClipboardWatcher extends EventEmitter {
   }
 
   /** Keeps the pictures folder inside its budget, oldest first, pinned safe. */
-  _enforceBudget() {
+  sweepImages() {
     const { drop, total, kept } = planEviction(this.items, this.budget);
     if (!drop.length) return;
     const gone = new Set(drop.map((d) => d.id));
@@ -519,7 +499,9 @@ class ClipboardWatcher extends EventEmitter {
             id: i.id,
             type: i.type,
             kind: i.kind,
-            thumbUrl: this._imageUrl(`${i.id}.thumb.png`),
+            // Entries recorded before pictures became files carry their preview
+            // inline; keep showing those rather than blanking old history.
+            thumbUrl: i.thumb || this._imageUrl(`${i.id}.thumb.png`),
             w: i.w,
             h: i.h,
             bytes: i.bytes,

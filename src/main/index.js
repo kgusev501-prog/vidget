@@ -570,7 +570,11 @@ function registerIpc() {
   ipcMain.handle('ya:dislike', () => yandex.toggleDislike());
   ipcMain.on('ya:open-auth', () => shell.openExternal(yandex.authUrl()));
 
-  ipcMain.handle('app:settings', () => ({ ...settings.get(), version: app.getVersion() }));
+  ipcMain.handle('app:settings', () => ({
+    ...settings.get(),
+    version: app.getVersion(),
+    clipImages: clip.imageUsage(),
+  }));
   ipcMain.handle('app:check-update', () =>
     updater.check(settings.get().updateUrl, (st) => send('app:update', st))
   );
@@ -580,6 +584,8 @@ function registerIpc() {
     settings.set(s);
     if (key === 'autostart') setAutostart(value);
     if (key === 'hotkey') registerHotkey(value);
+    // A smaller budget has to take effect now, not at the next copy.
+    if (key === 'imageBudget') clip.sweepImages();
     return s;
   });
   ipcMain.on('app:quit', () => quit());
