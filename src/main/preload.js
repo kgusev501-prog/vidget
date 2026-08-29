@@ -11,6 +11,8 @@ const on = (channel) => (handler) => {
 contextBridge.exposeInMainWorld('vidget', {
   ui: {
     onHover: on('ui:hover'),
+    size: () => ipcRenderer.invoke('ui:size'),
+    onSize: on('ui:size'),
     prepare: () => ipcRenderer.send('ui:prepare'),
     expand: () => ipcRenderer.send('ui:expand'),
     collapsed: () => ipcRenderer.send('ui:collapsed'),
@@ -71,6 +73,8 @@ contextBridge.exposeInMainWorld('vidget', {
   app: {
     settings: () => ipcRenderer.invoke('app:settings'),
     setSetting: (key, value) => ipcRenderer.invoke('app:set-setting', { key, value }),
+    checkUpdate: () => ipcRenderer.invoke('app:check-update'),
+    onUpdate: on('app:update'),
     quit: () => ipcRenderer.send('app:quit'),
   },
 });

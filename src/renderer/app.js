@@ -18,8 +18,16 @@ const el = (tag, cls, text) => {
   return n;
 };
 
-const PANEL_H = 288;
+// Kept in step with the main process, which measures the display; the value
+// here is only the starting point until the first message arrives.
+let PANEL_H = 288;
 const OPEN_THRESHOLD = 70;
+
+function applyShadeSize(size) {
+  if (!size || !size.shade) return;
+  PANEL_H = size.shade;
+  document.documentElement.style.setProperty('--panel-h', `${size.shade}px`);
+}
 
 const body = document.body;
 const handle = $('#handle');
@@ -33,6 +41,8 @@ let drag = null;
 
 // The main process owns hover detection: it watches the real cursor and hands
 // the mouse to this window only while the pointer is over the handle.
+api.ui.onSize(applyShadeSize);
+
 api.ui.onHover((on) => {
   if (isOpen || drag) return;
   body.classList.toggle('hover', on);
@@ -108,6 +118,7 @@ api.ui.onClose(() => {
   setPull(0);
   hidePreview();
   closeYa();
+  closeSettings();
   closeMenu();
   if (!noteEditor.hidden) closeNote();
 });
@@ -1509,6 +1520,126 @@ window.addEventListener('message', (e) => {
 });
 
 // ============================================================
+//  settings and the first run
+// ============================================================
+const settingsPane = $('#settings');
+const welcomePane = $('#welcome');
+
+const HOTKEY_NAMES = {
+  'Control+Alt+Space': 'Ctrl + Alt + Пробел',
+  'Control+Shift+Space': 'Ctrl + Shift + Пробел',
+  'Control+Alt+Q': 'Ctrl + Alt + Q',
+  'Alt+Shift+V': 'Alt + Shift + V',
+};
+
+async function paintSettings() {
+  const s = await api.app.settings();
+
+  $('#set-version').textContent = s.version ? `версия ${s.version}` : '';
+  $('#set-autostart').checked = s.autostart !== false;
+  $('#set-launch').checked = s.launchPlayer === true;
+  $('#set-images').checked = s.keepImages !== false;
+  $('#set-clip-limit').value = String(s.clipLimit || 300);
+  $('#set-update-url').value = s.updateUrl || '';
+
+  // The chosen combination may have been taken by another program, in which
+  // case the widget picked a free one — show what is actually in force.
+  const hotkey = s.hotkey || 'Control+Alt+Space';
+  if (!HOTKEY_NAMES[hotkey]) {
+    const extra = document.createElement('option');
+    extra.value = hotkey;
+    extra.textContent = hotkey;
+    $('#set-hotkey').append(extra);
+  }
+  $('#set-hotkey').value = hotkey;
+
+  $('#set-account').textContent = yaStatus.connected
+    ? `— ${yaStatus.login || 'подключён'}`
+    : '— не подключён';
+}
+
+function openSettings() {
+  settingsPane.hidden = false;
+  paintSettings();
+}
+
+const closeSettings = () => {
+  settingsPane.hidden = true;
+};
+
+$('#set-back').addEventListener('click', closeSettings);
+
+$('#set-hotkey').addEventListener('change', async (e) => {
+  const next = await api.app.setSetting('hotkey', e.target.value);
+  toast(
+    next.hotkey === e.target.value
+      ? `Панель открывается на ${HOTKEY_NAMES[next.hotkey] || next.hotkey}`
+      : 'Сочетание занято, выбрано другое'
+  );
+  paintSettings();
+});
+
+$('#set-autostart').addEventListener('change', (e) => api.app.setSetting('autostart', e.target.checked));
+$('#set-launch').addEventListener('change', (e) => api.app.setSetting('launchPlayer', e.target.checked));
+$('#set-images').addEventListener('change', (e) => api.app.setSetting('keepImages', e.target.checked));
+$('#set-clip-limit').addEventListener('change', (e) =>
+  api.app.setSetting('clipLimit', Number(e.target.value))
+);
+
+$('#set-update-url').addEventListener('change', (e) =>
+  api.app.setSetting('updateUrl', e.target.value.trim())
+);
+
+api.app.onUpdate((st) => {
+  $('#set-update').textContent = st && st.message ? `— ${st.message}` : '';
+  if (st && st.downloaded) toast('Обновление готово, встанет при выходе');
+});
+
+$('#set-account-btn').addEventListener('click', () => {
+  closeSettings();
+  openYa();
+});
+
+$('#set-update-btn').addEventListener('click', async () => {
+  const btn = $('#set-update-btn');
+  btn.disabled = true;
+  $('#set-update').textContent = '— проверяем…';
+  const res = await api.app.checkUpdate();
+  btn.disabled = false;
+  $('#set-update').textContent = res && res.message ? `— ${res.message}` : '';
+});
+
+// --- first run --------------------------------------------------------------
+async function maybeWelcome() {
+  const s = await api.app.settings();
+  if (s.seenWelcome) return;
+
+  const hotkey = s.hotkey || 'Control+Alt+Space';
+  $('#wel-hotkey').textContent =
+    `Открыть панель можно и с клавиатуры: ${HOTKEY_NAMES[hotkey] || hotkey}. ` +
+    'Значок в трее держит те же настройки и выход.';
+  welcomePane.hidden = false;
+  api.ui.expand();
+}
+
+function closeWelcome() {
+  welcomePane.hidden = true;
+  api.app.setSetting('seenWelcome', true);
+}
+
+$('#wel-close').addEventListener('click', closeWelcome);
+
+$('#wel-settings').addEventListener('click', () => {
+  closeWelcome();
+  openSettings();
+});
+
+$('#wel-login').addEventListener('click', () => {
+  closeWelcome();
+  openYa();
+});
+
+// ============================================================
 //  menu, toast, keys
 // ============================================================
 const menu = $('#menu');
@@ -1531,6 +1662,10 @@ menu.addEventListener('click', async (e) => {
   if (act === 'yandex') {
     closeMenu();
     return openYa();
+  }
+  if (act === 'settings') {
+    closeMenu();
+    return openSettings();
   }
   if (act === 'launchPlayer') {
     const s = await api.app.settings();
@@ -1562,6 +1697,8 @@ function toast(text) {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (!$('#preview').hidden) return hidePreview();
+    if (!welcomePane.hidden) return closeWelcome();
+    if (!settingsPane.hidden) return closeSettings();
     if (!yaPanel.hidden) return closeYa();
     if (!noteEditor.hidden) return closeNote();
     if (!menu.hidden) return closeMenu();
@@ -1615,7 +1752,11 @@ async function refreshAll() {
   paintReactions();
 }
 
+// The greeting waits for the first refresh so it can name the live hotkey.
+setTimeout(() => maybeWelcome().catch(() => {}), 1200);
+
 (async function boot() {
+  applyShadeSize(await api.ui.size());
   ytOrigin = await api.yt.origin();
   const s = await api.app.settings();
   lastTrack = s.lastTrack || null;

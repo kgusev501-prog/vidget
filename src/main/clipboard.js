@@ -32,10 +32,11 @@ const hash = (buf) => crypto.createHash('sha1').update(buf).digest('hex');
  * carries a small inline thumbnail so the renderer stays light.
  */
 class ClipboardWatcher extends EventEmitter {
-  constructor(store, imageDir) {
+  constructor(store, imageDir, options = () => ({})) {
     super();
     this.store = store;
     this.imageDir = imageDir;
+    this.options = options; // read fresh each time, so a change takes effect at once
     this.timer = null;
     this.lastSig = null;
     this.suppressUntil = 0;
@@ -139,6 +140,8 @@ class ClipboardWatcher extends EventEmitter {
 
     // Files are handled by the watcher above; nothing here can read them.
     if (hasFiles && !hasImage && !hasText) return;
+
+    if (hasImage && this.options().keepImages === false) return;
 
     if (hasImage) {
       let img;
@@ -258,6 +261,9 @@ class ClipboardWatcher extends EventEmitter {
   }
 
   _trim(items) {
+    const limit = Number(this.options().clipLimit) || MAX_ITEMS;
+    const imageLimit = this.options().keepImages === false ? 0 : MAX_IMAGES;
+
     const keep = [];
     let texts = 0;
     let images = 0;
@@ -268,11 +274,11 @@ class ClipboardWatcher extends EventEmitter {
         continue;
       }
       if (it.type === 'image') {
-        if (images++ < MAX_IMAGES) keep.push(it);
+        if (images++ < imageLimit) keep.push(it);
         else this._unlink(it);
       } else if (it.type === 'files') {
         if (files++ < MAX_FILES) keep.push(it);
-      } else if (texts++ < MAX_ITEMS) {
+      } else if (texts++ < limit) {
         keep.push(it);
       }
     }

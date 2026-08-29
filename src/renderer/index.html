@@ -213,10 +213,92 @@
           </div>
         </div>
 
+
+        <div id="settings" hidden>
+          <div class="overlay-bar">
+            <button id="set-back" class="icon-btn" title="Назад"><svg class="i"><use href="#i-back"/></svg></button>
+            <span>Настройки</span>
+            <span id="set-version" class="dim"></span>
+          </div>
+
+          <div id="set-body">
+            <label class="set-row">
+              <span class="set-label">Открывать панель</span>
+              <select id="set-hotkey">
+                <option value="Control+Alt+Space">Ctrl + Alt + Пробел</option>
+                <option value="Control+Shift+Space">Ctrl + Shift + Пробел</option>
+                <option value="Control+Alt+Q">Ctrl + Alt + Q</option>
+                <option value="Alt+Shift+V">Alt + Shift + V</option>
+              </select>
+            </label>
+
+            <label class="set-row">
+              <span class="set-label">Запускать при входе в Windows</span>
+              <input id="set-autostart" type="checkbox" />
+            </label>
+
+            <label class="set-row">
+              <span class="set-label">Запускать Яндекс Музыку вместе с виджетом</span>
+              <input id="set-launch" type="checkbox" />
+            </label>
+
+            <label class="set-row">
+              <span class="set-label">Хранить в буфере обмена</span>
+              <select id="set-clip-limit">
+                <option value="100">последние 100</option>
+                <option value="300">последние 300</option>
+                <option value="1000">последние 1000</option>
+              </select>
+            </label>
+
+            <label class="set-row">
+              <span class="set-label">Запоминать скопированные картинки</span>
+              <input id="set-images" type="checkbox" />
+            </label>
+
+            <div class="set-row">
+              <span class="set-label">Аккаунт Яндекса <b id="set-account" class="dim"></b></span>
+              <button id="set-account-btn" class="btn ghost">Открыть</button>
+            </div>
+
+            <div class="set-row">
+              <span class="set-label">Обновления <b id="set-update" class="dim"></b></span>
+              <button id="set-update-btn" class="btn ghost">Проверить</button>
+            </div>
+
+            <label class="set-row">
+              <span class="set-label">Адрес обновлений</span>
+              <input id="set-update-url" type="url" placeholder="https://…/vidget/" spellcheck="false" />
+            </label>
+          </div>
+        </div>
+
+        <div id="welcome" hidden>
+          <div class="overlay-bar">
+            <span>Добро пожаловать</span>
+          </div>
+          <div id="wel-body">
+            <p class="lead">Виджет живёт полоской у верхней кромки экрана. Потяните её вниз или нажмите — панель выкатится поверх всех окон.</p>
+            <ul class="wel-list">
+              <li><b>Музыка</b> — управляет тем плеером, который сейчас звучит, ищет треки и включает Мою волну.</li>
+              <li><b>YouTube</b> — находит и проигрывает видео прямо в панели.</li>
+              <li><b>Буфер обмена</b> — помнит скопированный текст, картинки и файлы.</li>
+              <li><b>Заметки</b> — быстрая запись в одну строку.</li>
+            </ul>
+            <p class="note" id="wel-hotkey"></p>
+            <div class="ya-row">
+              <button id="wel-login" class="btn">Войти в Яндекс Музыку</button>
+              <button id="wel-settings" class="btn ghost">Настройки</button>
+              <button id="wel-close" class="btn ghost">Начать</button>
+            </div>
+          </div>
+        </div>
+
         <div id="menu" hidden>
           <button data-act="yandex">Яндекс Музыка: <b id="m-ya">—</b></button>
           <button data-act="launchPlayer">Запускать плеер со стартом: <b id="m-launch">—</b></button>
           <button data-act="autostart">Автозапуск: <b id="m-autostart">—</b></button>
+          <button data-act="settings">Настройки</button>
           <button data-act="quit">Выйти из Vidget</button>
         </div>
       </section>

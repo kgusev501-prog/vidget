@@ -1430,3 +1430,108 @@ body.no-media #repeat {
 #ya-manual .steps {
   margin-top: 10px;
 }
+
+/* ── settings and welcome ────────────────────────────────── */
+#settings,
+#welcome {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  border-radius: 0 0 var(--radius) var(--radius);
+  display: flex;
+  flex-direction: column;
+  z-index: 28;
+}
+
+#set-body,
+#wel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 20px 16px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.dim {
+  color: var(--fg-faint);
+  font-weight: 400;
+}
+
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.set-row:last-child {
+  border-bottom: none;
+}
+
+.set-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.set-row select {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+
+.set-row select:focus {
+  border-color: rgba(61, 139, 255, 0.55);
+}
+
+.set-row input[type='checkbox'] {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.set-row .btn {
+  flex: 0 0 auto;
+}
+
+.set-row input[type='url'] {
+  flex: 0 0 340px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+  user-select: text;
+}
+
+.set-row input[type='url']:focus {
+  border-color: rgba(61, 139, 255, 0.55);
+}
+
+.wel-list {
+  margin: 10px 0 0 18px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--fg-dim);
+}
+
+.wel-list b {
+  color: var(--fg);
+}
+
+#wel-body .ya-row {
+  margin-top: 14px;
+}

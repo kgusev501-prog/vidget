@@ -53,6 +53,8 @@ const { YandexMusic } = require('./yandex');
 const yandexLogin = require('./yandex-login');
 const { Player } = require('./player');
 const { startServer } = require('./server');
+const { panelSize: measurePanel } = require('../shared/panel-size');
+const updater = require('./updater');
 const youtube = require('./youtube');
 
 // --- geometry ---------------------------------------------------------------
@@ -61,8 +63,6 @@ const youtube = require('./youtube');
 // stays click-through, except over the handle or while the shade is open.
 const HANDLE_W = 260;
 const HANDLE_H = 30;
-const PANEL_W = 980;
-const PANEL_H = 356; // shade is 288; the rest is fade-out room for the shadow
 
 const DEV = process.argv.includes('--dev');
 
@@ -110,13 +110,19 @@ function pollCursor() {
 }
 
 // --- window -----------------------------------------------------------------
+/** Panel size for the display the widget lives on. */
+function panelSize() {
+  return measurePanel(screen.getPrimaryDisplay().workArea);
+}
+
 function targetBounds() {
   const area = screen.getPrimaryDisplay().workArea;
+  const size = panelSize();
   return {
-    x: Math.round(area.x + (area.width - PANEL_W) / 2),
+    x: Math.round(area.x + (area.width - size.width) / 2),
     y: area.y,
-    width: PANEL_W,
-    height: Math.min(PANEL_H, area.height),
+    width: size.width,
+    height: size.height,
   };
 }
 
@@ -167,6 +173,7 @@ function createWindow() {
 
   win.once('ready-to-show', () => {
     win.showInactive();
+    sendShadeSize();
     startHoverWatch();
   });
 
@@ -244,6 +251,13 @@ function toggle() {
 function reposition() {
   if (!win || win.isDestroyed()) return;
   win.setBounds(targetBounds());
+  sendShadeSize();
+}
+
+/** The panel draws itself; it needs to know how tall the shade may be. */
+function sendShadeSize() {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send('ui:size', panelSize());
 }
 
 // --- tray -------------------------------------------------------------------
@@ -363,6 +377,9 @@ async function init() {
   settings = new Store(dir, 'settings', {
     autostart: true,
     launchPlayer: false,
+    keepImages: true,
+    clipLimit: 300,
+    updateUrl: '',
     hotkey: 'Control+Alt+Space',
     tab: 'music',
   });
@@ -371,7 +388,7 @@ async function init() {
   stores = [settings, clipStore, noteStore];
 
   media = new MediaBridge();
-  clip = new ClipboardWatcher(clipStore, path.join(dir, 'images'));
+  clip = new ClipboardWatcher(clipStore, path.join(dir, 'images'), () => settings.get());
   notes = new Notes(noteStore);
   yandex = new YandexMusic();
   player = new Player();
@@ -403,6 +420,10 @@ async function init() {
 
   // Retries on its own: right after a reboot there is often no network yet.
   yandex.startAutoConnect(loadToken);
+
+  // Looks for a newer build once the machine has settled, and only if an
+  // address was configured; it never interrupts on its own.
+  updater.checkQuietly(settings.get().updateUrl, (st) => send('app:update', st));
 
   // Off by default: the widget plays on its own, so starting the desktop app
   // would only put a second player on the machine. Still available in the menu.
@@ -461,6 +482,7 @@ function send(channel, payload) {
 
 // --- ipc --------------------------------------------------------------------
 function registerIpc() {
+  ipcMain.handle('ui:size', () => panelSize());
   ipcMain.on('ui:prepare', () => prepare());
   ipcMain.on('ui:expand', () => expand());
   ipcMain.on('ui:request-close', () => collapse());
@@ -538,7 +560,10 @@ function registerIpc() {
   ipcMain.handle('ya:dislike', () => yandex.toggleDislike());
   ipcMain.on('ya:open-auth', () => shell.openExternal(yandex.authUrl()));
 
-  ipcMain.handle('app:settings', () => settings.get());
+  ipcMain.handle('app:settings', () => ({ ...settings.get(), version: app.getVersion() }));
+  ipcMain.handle('app:check-update', () =>
+    updater.check(settings.get().updateUrl, (st) => send('app:update', st))
+  );
   ipcMain.handle('app:set-setting', (_e, { key, value }) => {
     const s = settings.get();
     s[key] = value;

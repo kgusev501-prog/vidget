@@ -7,8 +7,8 @@
     "start": "node tools/start.js",
     "dev": "node tools/start.js --dev",
     "icons": "node tools/make-icons.js",
-    "dist": "electron-builder --win",
-    "dist:portable": "electron-builder --win --dir -c.win.signAndEditExecutable=false",
+    "dist": "electron-builder --win --config electron-builder.config.js",
+    "dist:portable": "electron-builder --win --dir --config electron-builder.config.js -c.win.signAndEditExecutable=false",
     "predist": "node tools/prepare-signtool.js",
     "test": "node --test \"test/**/*.test.js\""
   },
@@ -18,42 +18,7 @@
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8"
   },
-  "build": {
-    "appId": "com.vidget.overlay",
-    "productName": "Vidget",
-    "directories": {
-      "output": "dist",
-      "buildResources": "assets"
-    },
-    "files": [
-      "src/**/*",
-      "assets/**/*",
-      "package.json"
-    ],
-    "asarUnpack": [
-      "src/ps/**"
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "assets/icon-256.png"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "shortcutName": "Vidget",
-      "installerLanguages": [
-        "ru_RU",
-        "en_US"
-      ]
-    }
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }
