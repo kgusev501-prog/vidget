@@ -31,7 +31,18 @@ function wire(onState) {
   autoUpdater.on('update-downloaded', (info) =>
     set(`версия ${info.version} готова, встанет при выходе`, { downloaded: true })
   );
-  autoUpdater.on('error', (err) => set(`не удалось: ${(err && err.message) || 'ошибка'}`));
+  autoUpdater.on('error', (err) => set(explain((err && err.message) || 'ошибка')));
+}
+
+/** Turns the library's wording into something worth showing a person. */
+function explain(message) {
+  // Running from source there is no build to update, and no feed description
+  // beside it.
+  if (/app-update\.yml/i.test(message)) return 'работает только в установленной версии';
+  if (/no published versions/i.test(message)) return 'пока нет ни одного релиза';
+  if (/net::|ENOTFOUND|ETIMEDOUT|EAI_AGAIN/i.test(message)) return 'нет связи с GitHub';
+  if (/404/.test(message)) return 'релизы не найдены';
+  return `не удалось: ${message}`;
 }
 
 /**
@@ -47,11 +58,7 @@ async function check(url, onState) {
     return state;
   } catch (err) {
     const message = (err && err.message) || 'ошибка';
-    // Running from source there is no build to update, and no feed description
-    // beside it — worth saying plainly instead of showing a raw failure.
-    state = /app-update\.yml/i.test(message)
-      ? { message: 'работает только в установленной версии' }
-      : { message: `не удалось: ${message}` };
+    state = { message: explain(message) };
     return state;
   }
 }
