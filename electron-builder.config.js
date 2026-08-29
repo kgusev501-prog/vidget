@@ -1,8 +1,8 @@
 'use strict';
 
-// The update feed is optional. When VIDGET_UPDATE_URL is set the build also
-// writes latest.yml next to the installer, which is what the widget reads to
-// notice a newer version; without it the build simply produces an installer.
+// Updates come from the releases of this repository. The address is baked into
+// the build, so an installed copy knows where to look without being told.
+// VIDGET_UPDATE_URL overrides it when the files live somewhere else instead.
 const updateUrl = process.env.VIDGET_UPDATE_URL;
 
 module.exports = {
@@ -23,5 +23,7 @@ module.exports = {
     shortcutName: 'Vidget',
     installerLanguages: ['ru_RU', 'en_US'],
   },
-  ...(updateUrl ? { publish: [{ provider: 'generic', url: updateUrl }] } : { publish: null }),
+  publish: updateUrl
+    ? [{ provider: 'generic', url: updateUrl }]
+    : [{ provider: 'github', owner: 'kgusev501-prog', repo: 'vidget' }],
 };

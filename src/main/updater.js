@@ -3,19 +3,18 @@
 const { autoUpdater } = require('electron-updater');
 
 /**
- * Updates from a plain static host.
+ * Updates from the project's GitHub releases.
  *
- * The address is a setting rather than something baked into the build, so the
- * same installer works whether the files end up on a site, a share or nowhere
- * at all. Point it at the folder holding `latest.yml` and the installer that
- * `npm run dist` produced.
+ * The address is baked in at build time, so an installed copy already knows
+ * where to look. A different host can still be given in the settings, which
+ * takes over when it is filled in.
  */
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 autoUpdater.logger = null;
 
 let wired = false;
-let state = { message: 'не настроено' };
+let state = { message: 'ещё не проверялось' };
 
 function wire(onState) {
   if (wired) return;
@@ -40,26 +39,25 @@ function wire(onState) {
  * the download, if any, carries on in the background.
  */
 async function check(url, onState) {
-  if (!url) {
-    state = { message: 'адрес обновлений не задан' };
-    return state;
-  }
-
   wire(onState);
   try {
-    autoUpdater.setFeedURL({ provider: 'generic', url });
-    const res = await autoUpdater.checkForUpdates();
-    if (!res || !res.updateInfo) return state;
+    // Only override the address the build already carries when one was given.
+    if (url) autoUpdater.setFeedURL({ provider: 'generic', url });
+    await autoUpdater.checkForUpdates();
     return state;
   } catch (err) {
-    state = { message: `не удалось: ${(err && err.message) || 'ошибка'}` };
+    const message = (err && err.message) || 'ошибка';
+    // Running from source there is no build to update, and no feed description
+    // beside it — worth saying plainly instead of showing a raw failure.
+    state = /app-update\.yml/i.test(message)
+      ? { message: 'работает только в установленной версии' }
+      : { message: `не удалось: ${message}` };
     return state;
   }
 }
 
 /** Quiet check on start: never interrupts, only reports through onState. */
 function checkQuietly(url, onState) {
-  if (!url) return;
   setTimeout(() => check(url, onState).catch(() => {}), 20000);
 }
 
