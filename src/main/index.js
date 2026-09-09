@@ -484,6 +484,18 @@ function quit() {
   app.quit();
 }
 
+/**
+ * Takes the window off the screen so the one underneath becomes active again.
+ *
+ * The only way to hand the foreground to another program on Windows is to stop
+ * being on the screen at all: collapsing the shade keeps the window active,
+ * and blur() leaves it in front too.
+ */
+function hideForTyping() {
+  if (!win || win.isDestroyed()) return;
+  win.hide();
+}
+
 /** The auto-type sidecar exists only while a database is configured. */
 function applyVaultRunning() {
   if (!autotype) return;
@@ -870,10 +882,22 @@ function registerVaultIpc() {
     const plan = vault.plan(id, front.title);
     if (!plan.ok) return plan;
 
+    // Rolling the shade up is not enough. The window stays active — Windows
+    // keeps it in front, and the sidecar rightly refuses to type into it.
+    // Asking it to give up the focus does not help either: blur() leaves it
+    // exactly where it was. Taking the window off the screen does, and then
+    // Windows puts back whatever the user was in. Measured, not assumed.
     collapse();
+    hideForTyping();
     await new Promise((r) => setTimeout(r, 320));
 
     const res = await autotype.type(plan.steps, front.title);
+
+    // The strip comes back without taking the focus from the window that just
+    // received the password.
+    if (win && !win.isDestroyed() && !win.isVisible()) win.showInactive();
+    finishCollapse();
+
     // Success speaks for itself — the password is in the form. A failure would
     // otherwise be silent, so the panel comes back to say what went wrong.
     if (!res.ok) {
