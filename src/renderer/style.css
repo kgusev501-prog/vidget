@@ -1881,3 +1881,51 @@ body.no-media #repeat {
   object-fit: contain;
   display: block;
 }
+
+/* ── what else can be done with an entry ─────────────────── */
+#vault-menu {
+  position: absolute;
+  background: var(--card-hi);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 4px;
+  z-index: 46;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+  min-width: 190px;
+}
+
+#vault-menu[hidden] {
+  display: none;
+}
+
+#vault-menu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+#vault-menu button:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+#vault-menu button .i {
+  width: 14px;
+  height: 14px;
+  color: var(--fg-dim);
+}
+
+#vault-menu .sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
+}

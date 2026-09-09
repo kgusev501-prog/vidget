@@ -170,6 +170,7 @@ api.ui.onClose(() => {
   closeSettings();
   closeMenu();
   closeVaultEntry();
+  closeVaultMenu();
   // Nothing about the passwords stays on screen behind a closed shade.
   if (vaultSearch.value) {
     vaultSearch.value = '';
@@ -1723,9 +1724,14 @@ function renderVaultList() {
     const why = vaultSuggested.get(item.id);
     if (why) row.append(el('div', 'pwhy', why));
 
-    const acts = [['type', 'type', 'Напечатать в окно'], ['copy', 'copy', 'Скопировать пароль']];
-    if (item.hasTotp) acts.push(['totp', 'clock', 'Скопировать одноразовый код']);
-    acts.push(['open', 'expand', 'Показать запись']);
+    // Two things by hand, because they are what a password list is for; the
+    // rest behind the dots, because a row of six identical squares is not a
+    // list any more. Clicking the row itself opens the entry.
+    const acts = [
+      ['type', 'type', 'Напечатать в окно'],
+      ['copy', 'copy', 'Скопировать пароль'],
+      ['menu', 'more', 'Ещё'],
+    ];
 
     const box = el('div', 'pacts');
     for (const [act, icon2, title] of acts) {
@@ -1811,8 +1817,13 @@ vaultList.addEventListener('click', (e) => {
   const id = row.dataset.id;
   const act = e.target.dataset.act;
   if (act === 'copy') return vaultCopy(id, 'Password', 'Пароль');
-  if (act === 'totp') return vaultCopy(id, 'TOTP', 'Код');
   if (act === 'type') return vaultType(id);
+  if (act === 'menu') {
+    e.stopPropagation();
+    const item = vaultItems.find((i) => i.id === id);
+    if (item) openVaultMenu(item, e.target);
+    return;
+  }
   openVaultEntry(id);
 });
 
@@ -1844,6 +1855,71 @@ $('#vault-lock').addEventListener('click', () => {
 });
 
 $('#vault-pick').addEventListener('click', () => pickVaultFile());
+
+// --- what else can be done with an entry ------------------------------------
+const vaultMenu = $('#vault-menu');
+
+function closeVaultMenu() {
+  vaultMenu.hidden = true;
+  vaultMenu.textContent = '';
+}
+
+/**
+ * Opens the little menu next to the row's dots.
+ *
+ * Copying the user name and the address belongs here rather than as two more
+ * squares in every row: a list of entries should read as a list, not as a wall
+ * of identical buttons.
+ */
+function openVaultMenu(item, anchor) {
+  closeVaultMenu();
+
+  const entries = [
+    ['copy', 'Скопировать логин', 'copy', item.user, () => vaultCopy(item.id, 'UserName', 'Логин')],
+    ['copy', 'Скопировать пароль', 'copy', item.hasPassword, () => vaultCopy(item.id, 'Password', 'Пароль')],
+    ['copy', 'Скопировать адрес', 'copy', item.url, () => vaultCopy(item.id, 'URL', 'Адрес')],
+    ['clock', 'Скопировать одноразовый код', 'clock', item.hasTotp, () => vaultCopy(item.id, 'TOTP', 'Код')],
+    [null, null, null, true, null], // separator
+    ['expand', 'Открыть адрес в браузере', 'expand', item.url, async () => {
+      const res = await api.vault.openUrl(item.id);
+      if (res && !res.ok) toast(res.error);
+    }],
+    ['key', 'Показать запись', 'key', true, () => openVaultEntry(item.id)],
+  ];
+
+  for (const [icon, label, , available, run] of entries) {
+    if (!available) continue;
+    if (!label) {
+      vaultMenu.append(el('div', 'sep'));
+      continue;
+    }
+    const button = el('button', null);
+    button.append(svgIcon(icon));
+    button.append(document.createTextNode(label));
+    button.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeVaultMenu();
+      run();
+    });
+    vaultMenu.append(button);
+  }
+
+  // Placed under the dots, and nudged back inside the panel when it would hang
+  // off the edge.
+  vaultMenu.hidden = false;
+  const spot = anchor.getBoundingClientRect();
+  const size = vaultMenu.getBoundingClientRect();
+  const panelBox = panel.getBoundingClientRect();
+  const left = Math.min(Math.max(8, spot.right - size.width), panelBox.width - size.width - 8);
+  const below = spot.bottom + 4;
+  const top = below + size.height > panelBox.height - 8 ? spot.top - size.height - 4 : below;
+  vaultMenu.style.left = `${Math.round(left)}px`;
+  vaultMenu.style.top = `${Math.round(Math.max(8, top))}px`;
+}
+
+document.addEventListener('click', (e) => {
+  if (!vaultMenu.hidden && !vaultMenu.contains(e.target)) closeVaultMenu();
+});
 
 // --- unlocking --------------------------------------------------------------
 $('#vault-unlock').addEventListener('submit', async (e) => {
@@ -2375,6 +2451,7 @@ function toast(text) {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (!$('#preview').hidden) return hidePreview();
+    if (!vaultMenu.hidden) return closeVaultMenu();
     if (!vaultEntry.hidden) return closeVaultEntry();
     if (!welcomePane.hidden) return closeWelcome();
     if (!settingsPane.hidden) return closeSettings();
