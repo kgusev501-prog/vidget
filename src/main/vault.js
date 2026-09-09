@@ -371,6 +371,19 @@ class Vault extends EventEmitter {
     return search(this.list(), query, limit);
   }
 
+  /**
+   * Whether anything in the database suits this window.
+   *
+   * Deliberately does not count as using the vault: the strip is asked this on
+   * every window change, and if that put off the automatic lock, an open
+   * database would simply never close while somebody works.
+   */
+  hasMatchFor(windowTitle) {
+    if (!this.unlocked || !windowTitle) return false;
+    const usable = this.entries.filter((e) => e.searchable && e.autoType.enabled);
+    return forWindow(usable, windowTitle).length > 0;
+  }
+
   /** Entries worth offering for the window in front, best first. */
   forWindow(windowTitle) {
     this.touch();
@@ -381,6 +394,192 @@ class Vault extends EventEmitter {
       why: hit.why,
       sequence: hit.sequence,
     }));
+  }
+
+  // --- changing the database ------------------------------------------------
+  // Writing is the one thing here that can cost somebody their passwords, so
+  // every path into it goes through _write below: it refuses when KeePass has
+  // the file, refuses when the file changed under us, and never leaves a
+  // half-written database where the real one was.
+
+  /** KeePass and KeePassXC both drop a lock file beside an open database. */
+  lockedByKeePass() {
+    const file = this.file;
+    if (!file) return false;
+    const candidates = [`${file}.lock`, file.replace(/[.]kdbx$/i, '.lock')];
+    return candidates.some((p) => {
+      try {
+        return fs.existsSync(p);
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  /**
+   * Saves the database back where it came from.
+   *
+   * @param {string} what for the log, so a surprise in the file has a name
+   */
+  async _write(what) {
+    if (!this.db) return { ok: false, error: 'База закрыта' };
+
+    // KeePass holds the file open and will write its own copy over ours when
+    // it saves. Nothing we could do here would survive that.
+    if (this.lockedByKeePass()) {
+      return { ok: false, error: 'База открыта в KeePass — закройте её там и повторите' };
+    }
+
+    // Somebody saved over the file since we read it. Their change is on disk
+    // and ours is not; overwriting would throw theirs away.
+    try {
+      const stat = await fs.promises.stat(this.file);
+      if (`${stat.mtimeMs}:${stat.size}` !== this.fileStamp) {
+        await this.reload();
+        return { ok: false, error: 'База изменилась на диске, она перечитана — повторите' };
+      }
+    } catch (err) {
+      return { ok: false, error: explain(err) };
+    }
+
+    let bytes;
+    try {
+      bytes = await this.db.save();
+    } catch (err) {
+      return { ok: false, error: `Не удалось собрать базу: ${err.message}` };
+    }
+
+    // Written beside the real file and moved into place in one step, so an
+    // interrupted save cannot leave a database that opens to nothing.
+    const temp = `${this.file}.vidget-${Date.now()}`;
+    try {
+      await fs.promises.writeFile(temp, Buffer.from(bytes));
+      await fs.promises.rename(temp, this.file);
+    } catch (err) {
+      fs.rm(temp, { force: true }, () => {});
+      return { ok: false, error: `Не удалось записать базу: ${err.message}` };
+    }
+
+    try {
+      const stat = await fs.promises.stat(this.file);
+      this.fileStamp = `${stat.mtimeMs}:${stat.size}`;
+      this._checkedAt = Date.now();
+    } catch {
+      /* it is written; the stamp will catch up on the next look */
+    }
+
+    this._index();
+    console.log('[vault] записано:', what);
+    this.emit('reloaded', this.entries.length);
+    return { ok: true };
+  }
+
+  /** The groups an entry can be put in, as a flat list of paths. */
+  groups() {
+    this.touch();
+    if (!this.db) return [];
+    const binId = this.db.meta.recycleBinUuid && this.db.meta.recycleBinUuid.id;
+    const out = [];
+    const walk = (group, trail) => {
+      if (!group || (binId && idOf(group) === binId)) return;
+      const here = trail ? `${trail} / ${group.name}` : group.name;
+      out.push({ id: idOf(group), path: here });
+      for (const child of group.groups || []) walk(child, here);
+    };
+    for (const root of this.db.groups || []) walk(root, '');
+    return out;
+  }
+
+  _groupById(id) {
+    if (!this.db) return null;
+    let hit = null;
+    const walk = (group) => {
+      if (!group || hit) return;
+      if (idOf(group) === id) {
+        hit = group;
+        return;
+      }
+      for (const child of group.groups || []) walk(child);
+    };
+    for (const root of this.db.groups || []) walk(root);
+    return hit;
+  }
+
+  /** Puts the fields of a form onto an entry, protecting what should be. */
+  _applyFields(entry, fields) {
+    const SECRET = new Set(['Password']);
+    for (const [name, value] of Object.entries(fields || {})) {
+      if (value === undefined) continue;
+      if (value === null || value === '') {
+        // An emptied field goes away rather than staying as an empty string,
+        // which is what KeePass itself does.
+        if (!STANDARD.has(name)) entry.fields.delete(name);
+        else entry.fields.set(name, '');
+        continue;
+      }
+      const wasProtected = isProtected(entry.fields.get(name));
+      entry.fields.set(
+        name,
+        SECRET.has(name) || wasProtected ? kdbxweb.ProtectedValue.fromString(String(value)) : String(value)
+      );
+    }
+  }
+
+  /** A new entry in the group asked for, or in the first one there is. */
+  async createEntry({ groupId, fields } = {}) {
+    if (!this.db) return { ok: false, error: 'База закрыта' };
+    const title = fields && fields.Title;
+    if (!title || !String(title).trim()) return { ok: false, error: 'Без названия запись не найти' };
+
+    const group = (groupId && this._groupById(groupId)) || this.db.getDefaultGroup();
+    if (!group) return { ok: false, error: 'Некуда положить запись' };
+
+    const entry = this.db.createEntry(group);
+    this._applyFields(entry, fields);
+    entry.times.update();
+
+    const res = await this._write(`новая запись «${title}»`);
+    if (!res.ok) {
+      // Take it back out, or a failed save would leave a ghost entry in the
+      // list until the next unlock.
+      group.entries = group.entries.filter((e) => e !== entry);
+      this._index();
+      return res;
+    }
+    return { ok: true, id: idOf(entry) };
+  }
+
+  /** Changes an existing entry, keeping what it said before. */
+  async updateEntry(id, fields) {
+    if (!this.db) return { ok: false, error: 'База закрыта' };
+    const held = this.byId.get(id);
+    if (!held) return { ok: false, error: 'Запись не найдена' };
+
+    // The old values become a history entry, exactly as KeePass does it, so
+    // nothing typed over is lost.
+    held.entry.pushHistory();
+    this._applyFields(held.entry, fields);
+    held.entry.times.update();
+
+    const res = await this._write(`правка записи «${text(held.entry.fields.get('Title'))}»`);
+    if (!res.ok) {
+      held.entry.removeHistory(held.entry.history.length - 1);
+      await this.reload();
+    }
+    return res;
+  }
+
+  /** Moves an entry to the recycle bin, the way KeePass does. */
+  async deleteEntry(id) {
+    if (!this.db) return { ok: false, error: 'База закрыта' };
+    const held = this.byId.get(id);
+    if (!held) return { ok: false, error: 'Запись не найдена' };
+    const title = text(held.entry.fields.get('Title'));
+
+    this.db.remove(held.entry);
+    const res = await this._write(`удаление записи «${title}»`);
+    if (!res.ok) await this.reload();
+    return { ...res, title };
   }
 
   // --- secrets, one at a time ----------------------------------------------

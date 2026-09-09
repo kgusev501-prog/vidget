@@ -171,7 +171,7 @@
             <div id="vault-setup" class="vault-middle" hidden>
               <svg class="i big"><use href="#i-key"/></svg>
               <p class="lead">Виджет открывает вашу базу KeePass и печатает из неё пароли в то окно, где вы работаете.</p>
-              <p class="note">Файл только читается. Записи по-прежнему правятся в KeePass.</p>
+              <p class="note">Записи можно добавлять и править прямо здесь. Пока база открыта в самом KeePass, виджет в неё не пишет.</p>
               <button id="vault-pick" class="btn">Выбрать файл базы…</button>
             </div>
 
@@ -190,6 +190,7 @@
             <div id="vault-open-pane" hidden>
               <div class="toolbar">
                 <input id="vault-search" type="search" placeholder="Поиск по паролям…  (Enter — напечатать)" spellcheck="false" autocomplete="off" />
+                <button id="vault-add" class="icon-btn" title="Добавить запись">+</button>
                 <button id="vault-lock" class="icon-btn" title="Закрыть базу"><svg class="i"><use href="#i-unlock"/></svg></button>
               </div>
               <div id="vault-window" hidden></div>
@@ -224,6 +225,7 @@
           <div class="overlay-bar">
             <button id="ve-back" class="icon-btn" title="Назад"><svg class="i"><use href="#i-back"/></svg></button>
             <span id="ve-title"></span>
+            <button id="ve-edit" class="btn ghost">Изменить</button>
             <button id="ve-type" class="btn">Напечатать</button>
           </div>
           <div id="ve-body"></div>
@@ -392,6 +394,45 @@
             </div>
           </div>
         </div>
+
+        <!-- adding an entry, and changing one -->
+        <form id="vault-form" hidden>
+          <div class="overlay-bar">
+            <button id="vf-back" class="icon-btn" type="button" title="Назад"><svg class="i"><use href="#i-back"/></svg></button>
+            <span id="vf-title">Новая запись</span>
+            <button id="vf-delete" class="icon-btn" type="button" title="Удалить запись" hidden><svg class="i"><use href="#i-trash"/></svg></button>
+            <button id="vf-save" class="btn" type="submit">Сохранить</button>
+          </div>
+          <div id="vf-body">
+            <label class="vf-row">
+              <span class="vf-name">Название</span>
+              <input id="vf-name" type="text" spellcheck="false" autocomplete="off" placeholder="Например, GitHub" />
+            </label>
+            <label class="vf-row">
+              <span class="vf-name">Логин</span>
+              <input id="vf-user" type="text" spellcheck="false" autocomplete="off" />
+            </label>
+            <div class="vf-row">
+              <span class="vf-name">Пароль</span>
+              <input id="vf-password" type="password" spellcheck="false" autocomplete="new-password" />
+              <button id="vf-eye" class="icon-btn" type="button" title="Показать"><svg class="i"><use id="vf-eye-use" href="#i-eye"/></svg></button>
+              <button id="vf-make" class="icon-btn" type="button" title="Придумать пароль"><svg class="i"><use href="#i-key"/></svg></button>
+            </div>
+            <label class="vf-row">
+              <span class="vf-name">Адрес</span>
+              <input id="vf-url" type="text" spellcheck="false" autocomplete="off" placeholder="https://" />
+            </label>
+            <label class="vf-row">
+              <span class="vf-name">Группа</span>
+              <select id="vf-group"></select>
+            </label>
+            <label class="vf-row tall">
+              <span class="vf-name">Заметки</span>
+              <textarea id="vf-notes" rows="3" spellcheck="false"></textarea>
+            </label>
+            <p id="vf-msg" class="note"></p>
+          </div>
+        </form>
 
         <!-- what else can be done with one entry, opened from its row -->
         <div id="vault-menu" hidden></div>

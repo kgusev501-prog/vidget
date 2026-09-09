@@ -348,3 +348,164 @@ test('история: прежний пароль достаётся по ном
   assert.equal(vault.pastSecret(id, 99), null);
   vault.lock();
 });
+
+// ── changing the database ──────────────────────────────────────────────────
+// Writing is the only thing here that can cost somebody their passwords, so
+// these check what happens when it goes wrong as much as when it goes right.
+
+test('запись: новая запись появляется в базе и переживает переоткрытие', async () => {
+  const { file } = await makeDatabase();
+  const { vault } = await openVault(file);
+
+  const res = await vault.createEntry({
+    fields: { Title: 'Новый сайт', UserName: 'вася', Password: 'свежий', URL: 'https://example.com' },
+  });
+  assert.equal(res.ok, true);
+  assert.ok(vault.list().some((e) => e.title === 'Новый сайт'));
+  vault.lock();
+
+  const again = await openVault(file);
+  const found = again.vault.list().find((e) => e.title === 'Новый сайт');
+  assert.ok(found, 'запись осталась в файле');
+  assert.equal(again.vault.secret(found.id), 'свежий');
+  again.vault.lock();
+});
+
+test('запись: пароль ложится защищённым, а не строкой', async () => {
+  const { file } = await makeDatabase();
+  const { vault } = await openVault(file);
+  await vault.createEntry({ fields: { Title: 'Проверка защиты', Password: 'секрет' } });
+  vault.lock();
+
+  // Read the file back with the library directly: a password stored in the
+  // open would be visible to anything that opens the database.
+  const creds = new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString(PASSWORD), null);
+  const db = await kdbxweb.Kdbx.load(new Uint8Array(fs.readFileSync(file)).buffer, creds);
+  let entry = null;
+  const walk = (g) => {
+    for (const e of g.entries) if (e.fields.get('Title') === 'Проверка защиты') entry = e;
+    for (const c of g.groups) walk(c);
+  };
+  for (const root of db.groups) walk(root);
+  assert.ok(entry);
+  assert.equal(typeof entry.fields.get('Password').getText, 'function', 'пароль защищён');
+});
+
+test('запись: без названия не создаётся', async () => {
+  const { file } = await makeDatabase();
+  const { vault } = await openVault(file);
+  const res = await vault.createEntry({ fields: { UserName: 'кто-то', Password: 'что-то' } });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /названия/);
+  vault.lock();
+});
+
+test('запись: правка сохраняет прежнее значение в историю', async () => {
+  const { file, ghId } = await makeDatabase();
+  const { vault } = await openVault(file);
+
+  const res = await vault.updateEntry(ghId, { Password: 'новый-гит', UserName: 'gus2' });
+  assert.equal(res.ok, true);
+  assert.equal(vault.secret(ghId), 'новый-гит');
+
+  const past = vault.history(ghId);
+  assert.equal(past.length, 1, 'прежняя версия записи сохранена');
+  assert.equal(vault.pastSecret(ghId, past[0].index), 'гит-пароль', 'а в ней прежний пароль');
+  vault.lock();
+});
+
+test('запись: удаление уводит в корзину, а не стирает', async () => {
+  const { file, ghId } = await makeDatabase();
+  const { vault } = await openVault(file);
+
+  const res = await vault.deleteEntry(ghId);
+  assert.equal(res.ok, true);
+  assert.ok(!vault.list().some((e) => e.id === ghId), 'из списка исчезла');
+
+  // The recycle bin is not shown, but the entry is still in the file.
+  const creds = new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString(PASSWORD), null);
+  const db = await kdbxweb.Kdbx.load(new Uint8Array(fs.readFileSync(file)).buffer, creds);
+  let seen = 0;
+  const walk = (g) => {
+    for (const e of g.entries) if (e.fields.get('Title') === 'GitHub') seen++;
+    for (const c of g.groups) walk(c);
+  };
+  for (const root of db.groups) walk(root);
+  assert.equal(seen, 1, 'запись лежит в корзине базы');
+  vault.lock();
+});
+
+test('запись: пока база открыта в KeePass, ничего не пишется', async () => {
+  const { file } = await makeDatabase();
+  const { vault } = await openVault(file);
+  fs.writeFileSync(`${file}.lock`, '');
+
+  const res = await vault.createEntry({ fields: { Title: 'Не должна появиться' } });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /KeePass/);
+  assert.ok(!vault.list().some((e) => e.title === 'Не должна появиться'), 'и в списке её нет');
+
+  fs.rmSync(`${file}.lock`);
+  vault.lock();
+});
+
+test('запись: чужие правки не затираются молча', async () => {
+  const { file } = await makeDatabase();
+  const { vault } = await openVault(file);
+
+  // Somebody saves over the file while we hold it open.
+  const creds = new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString(PASSWORD), null);
+  const db = await kdbxweb.Kdbx.load(new Uint8Array(fs.readFileSync(file)).buffer, creds);
+  const theirs = db.createEntry(db.getDefaultGroup());
+  theirs.fields.set('Title', 'Чужая правка');
+  fs.writeFileSync(file, Buffer.from(await db.save()));
+
+  const res = await vault.createEntry({ fields: { Title: 'Наша запись' } });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /изменилась/);
+  assert.ok(vault.list().some((e) => e.title === 'Чужая правка'), 'база перечитана, чужое на месте');
+  vault.lock();
+});
+
+test('запись: в закрытую базу писать нечего', async () => {
+  const { file, ghId } = await makeDatabase();
+  const { vault } = await openVault(file);
+  vault.lock();
+  assert.equal((await vault.createEntry({ fields: { Title: 'Ага' } })).ok, false);
+  assert.equal((await vault.updateEntry(ghId, { Password: 'ага' })).ok, false);
+  assert.equal((await vault.deleteEntry(ghId)).ok, false);
+});
+
+test('группы: список путей, куда можно положить запись', async () => {
+  const { file } = await makeDatabase();
+  const { vault } = await openVault(file);
+  const paths = vault.groups().map((g) => g.path);
+  assert.ok(paths.some((p) => p.endsWith('Почта')));
+  assert.ok(!paths.some((p) => p.includes('Корзина')), 'корзина не предлагается');
+  vault.lock();
+});
+
+// ── the hint on the strip ──────────────────────────────────────────────────
+test('подсказка: есть ли для окна подходящая запись', async () => {
+  const { file } = await makeDatabase();
+  const { vault } = await openVault(file);
+  assert.equal(vault.hasMatchFor('GitHub — Google Chrome'), true);
+  assert.equal(vault.hasMatchFor('Совершенно постороннее окно'), false);
+  assert.equal(vault.hasMatchFor(''), false);
+  vault.lock();
+  assert.equal(vault.hasMatchFor('GitHub — Google Chrome'), false, 'закрытая база не подсказывает');
+});
+
+test('подсказка: спрашивать о ней не значит пользоваться базой', async () => {
+  const { file } = await makeDatabase();
+  // The strip asks this on every window change. If that counted as using the
+  // vault, an open database would never lock while somebody works.
+  const vault = new Vault(() => ({ vaultPath: file, vaultLockMinutes: 0.15 / 60 }));
+  await vault.unlock(PASSWORD);
+
+  for (let i = 0; i < 8; i++) {
+    vault.hasMatchFor('GitHub — Google Chrome');
+    await new Promise((r) => setTimeout(r, 40));
+  }
+  assert.equal(vault.unlocked, false, 'замок защёлкнулся, несмотря на вопросы про окно');
+});

@@ -56,6 +56,7 @@ const { YandexMusic } = require('./yandex');
 const yandexLogin = require('./yandex-login');
 const { Player } = require('./player');
 const { Vault } = require('./vault');
+const { generate: generatePassword } = require('../shared/password');
 const { AutoType } = require('./autotype');
 const { startServer } = require('./server');
 const { panelSize: measurePanel, slotX, slotFraction } = require('../shared/panel-size');
@@ -496,6 +497,19 @@ function hideForTyping() {
   win.hide();
 }
 
+/**
+ * Tells the panel whether the strip should hint at itself.
+ *
+ * The whole answer is already in memory — this is the same matching that puts
+ * the right entry at the top of the list — so it costs a comparison per window
+ * change and nothing at all while the window stays put.
+ */
+function sendVaultHint(front) {
+  if (!vault) return;
+  const title = (front && front.title) || (autotype && autotype.front() && autotype.front().title);
+  send('vault:hint', vault.hasMatchFor(title));
+}
+
 /** The auto-type sidecar exists only while a database is configured. */
 function applyVaultRunning() {
   if (!autotype) return;
@@ -579,9 +593,15 @@ async function init() {
     send('vault:status', st);
     refreshTrayMenu(); // the tray offers to lock only while there is something open
   });
-  vault.on('locked', (reason) => send('vault:locked', reason));
+  vault.on('locked', (reason) => {
+    send('vault:locked', reason);
+    send('vault:hint', false);
+  });
   vault.on('reloaded', () => send('vault:list', vault.list()));
-  autotype.on('window', (w) => send('vault:window', w));
+  autotype.on('window', (w) => {
+    send('vault:window', w);
+    sendVaultHint(w);
+  });
 
   // Walking away from the machine should close the passwords, whatever the
   // idle timer says.
@@ -840,6 +860,7 @@ function registerVaultIpc() {
 
   ipcMain.handle('vault:unlock', async (_e, password) => {
     const res = await vault.unlock(password);
+    if (res.ok) sendVaultHint(null);
     return { ...res, status: vault.status() };
   });
 
@@ -923,6 +944,13 @@ function registerVaultIpc() {
     }
     return res;
   });
+
+  // --- changing the database ---
+  ipcMain.handle('vault:groups', () => vault.groups());
+  ipcMain.handle('vault:create', (_e, { groupId, fields }) => vault.createEntry({ groupId, fields }));
+  ipcMain.handle('vault:update', (_e, { id, fields }) => vault.updateEntry(id, fields));
+  ipcMain.handle('vault:delete', (_e, id) => vault.deleteEntry(id));
+  ipcMain.handle('vault:generate', (_e, options) => generatePassword(options || {}));
 
   ipcMain.handle('vault:save-attachment', async (_e, { id, name }) => {
     const bytes = vault.attachment(id, name);

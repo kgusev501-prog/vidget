@@ -171,6 +171,7 @@ api.ui.onClose(() => {
   closeMenu();
   closeVaultEntry();
   closeVaultMenu();
+  closeVaultForm();
   // Nothing about the passwords stays on screen behind a closed shade.
   if (vaultSearch.value) {
     vaultSearch.value = '';
@@ -1885,6 +1886,7 @@ function openVaultMenu(item, anchor) {
       if (res && !res.ok) toast(res.error);
     }],
     ['key', 'Показать запись', 'key', true, () => openVaultEntry(item.id)],
+    ['note', 'Изменить запись', 'note', true, () => openVaultForm(item.id)],
   ];
 
   for (const [icon, label, , available, run] of entries) {
@@ -2147,6 +2149,145 @@ $('#ve-back').addEventListener('click', closeVaultEntry);
 $('#ve-type').addEventListener('click', () => {
   if (vaultEntryId) vaultType(vaultEntryId);
 });
+$('#ve-edit').addEventListener('click', () => {
+  if (!vaultEntryId) return;
+  const id = vaultEntryId;
+  closeVaultEntry();
+  openVaultForm(id);
+});
+
+// --- adding an entry, and changing one --------------------------------------
+const vaultForm = $('#vault-form');
+let vaultFormId = null; // the entry being changed, or null for a new one
+
+async function openVaultForm(id) {
+  vaultFormId = id || null;
+  const item = id ? vaultItems.find((e) => e.id === id) : null;
+
+  $('#vf-title').textContent = item ? 'Изменить запись' : 'Новая запись';
+  $('#vf-delete').hidden = !item;
+  $('#vf-msg').textContent = '';
+  $('#vf-msg').className = 'note';
+
+  $('#vf-name').value = item ? item.title : '';
+  $('#vf-user').value = item ? item.user : '';
+  $('#vf-url').value = item ? item.url : '';
+  $('#vf-notes').value = item ? item.notes : '';
+  // The password is fetched rather than carried in the list, like every other
+  // secret; the field starts empty for a new entry.
+  $('#vf-password').value = item && item.hasPassword ? await api.vault.reveal(id, 'Password') : '';
+  $('#vf-password').type = 'password';
+  $('#vf-eye-use').setAttribute('href', '#i-eye');
+
+  const picker = $('#vf-group');
+  picker.textContent = '';
+  for (const group of await api.vault.groups()) {
+    const option = document.createElement('option');
+    option.value = group.id;
+    option.textContent = group.path;
+    picker.append(option);
+  }
+  if (item) {
+    const match = [...picker.options].find((o) => o.textContent === item.group);
+    if (match) picker.value = match.value;
+  }
+
+  vaultForm.hidden = false;
+  setTimeout(() => $('#vf-name').focus(), 50);
+}
+
+function closeVaultForm() {
+  vaultFormId = null;
+  vaultForm.hidden = true;
+  // Nothing typed into the form outlives it, the password least of all.
+  $('#vf-password').value = '';
+  $('#vf-notes').value = '';
+}
+
+$('#vault-add').addEventListener('click', () => openVaultForm(null));
+$('#vf-back').addEventListener('click', closeVaultForm);
+
+$('#vf-eye').addEventListener('click', () => {
+  const box = $('#vf-password');
+  const shown = box.type === 'text';
+  box.type = shown ? 'password' : 'text';
+  $('#vf-eye-use').setAttribute('href', shown ? '#i-eye' : '#i-eye-off');
+});
+
+$('#vf-make').addEventListener('click', async () => {
+  const made = await api.vault.generate({ length: 20 });
+  const box = $('#vf-password');
+  box.value = made;
+  box.type = 'text';
+  $('#vf-eye-use').setAttribute('href', '#i-eye-off');
+});
+
+vaultForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = $('#vf-msg');
+  const title = $('#vf-name').value.trim();
+  if (!title) {
+    msg.textContent = 'Без названия запись потом не найти';
+    msg.className = 'note bad';
+    return $('#vf-name').focus();
+  }
+
+  const fields = {
+    Title: title,
+    UserName: $('#vf-user').value,
+    Password: $('#vf-password').value,
+    URL: $('#vf-url').value,
+    Notes: $('#vf-notes').value,
+  };
+
+  const save = $('#vf-save');
+  save.disabled = true;
+  msg.textContent = 'Сохраняем…';
+  msg.className = 'note';
+
+  const res = vaultFormId
+    ? await api.vault.update(vaultFormId, fields)
+    : await api.vault.create($('#vf-group').value, fields);
+  save.disabled = false;
+
+  if (!res || !res.ok) {
+    msg.textContent = (res && res.error) || 'Не удалось сохранить';
+    msg.className = 'note bad';
+    return;
+  }
+  closeVaultForm();
+  await refreshVaultList(true);
+  toast(vaultFormId ? 'Запись изменена' : 'Запись добавлена');
+});
+
+$('#vf-delete').addEventListener('click', async () => {
+  if (!vaultFormId) return;
+  const button = $('#vf-delete');
+  // Two presses rather than a dialog box: the shade has nowhere to put one,
+  // and an accidental single click should not throw a password away.
+  if (button.dataset.armed !== 'yes') {
+    button.dataset.armed = 'yes';
+    button.classList.add('on');
+    $('#vf-msg').textContent = 'Нажмите ещё раз, чтобы отправить запись в корзину базы';
+    $('#vf-msg').className = 'note bad';
+    setTimeout(() => {
+      button.dataset.armed = '';
+      button.classList.remove('on');
+    }, 4000);
+    return;
+  }
+  const res = await api.vault.remove(vaultFormId);
+  button.dataset.armed = '';
+  button.classList.remove('on');
+  if (!res || !res.ok) {
+    $('#vf-msg').textContent = (res && res.error) || 'Не удалось удалить';
+    $('#vf-msg').className = 'note bad';
+    return;
+  }
+  closeVaultForm();
+  await refreshVaultList();
+  toast(`«${res.title}» в корзине базы`);
+});
 
 // --- choosing the file ------------------------------------------------------
 async function pickVaultFile(what) {
@@ -2190,6 +2331,10 @@ api.vault.onTyped((res) => {
 });
 
 api.vault.onCleared(() => toast('Пароль стёрт из буфера обмена'));
+
+// The strip hints that the open database has something for the window in
+// front. Nothing pops up and nothing takes the focus.
+api.vault.onHint((on) => body.classList.toggle('vault-hint', !!on));
 
 // Opened by its own hotkey: straight to the passwords, with the cursor where
 // typing will do something.
@@ -2452,6 +2597,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (!$('#preview').hidden) return hidePreview();
     if (!vaultMenu.hidden) return closeVaultMenu();
+    if (!vaultForm.hidden) return closeVaultForm();
     if (!vaultEntry.hidden) return closeVaultEntry();
     if (!welcomePane.hidden) return closeWelcome();
     if (!settingsPane.hidden) return closeSettings();
