@@ -1842,7 +1842,12 @@ $('#vault-unlock').addEventListener('submit', async (e) => {
   const box = $('#vault-password');
   const msg = $('#vault-unlock-msg');
   const button = $('#vault-open');
-  if (!box.value) return;
+  // A database can be locked with a key file alone, and then there is no
+  // password to type — but with neither, there is nothing to try.
+  if (!box.value && !vaultStatus.keyFile) {
+    msg.textContent = 'Введите мастер-пароль';
+    return;
+  }
 
   button.disabled = true;
   msg.textContent = 'Открываем…';
