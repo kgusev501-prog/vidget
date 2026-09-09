@@ -318,9 +318,11 @@ class Vault extends EventEmitter {
       title: text(fields.get('Title')) || '(без названия)',
       user: isProtected(fields.get('UserName')) ? '' : text(fields.get('UserName')),
       url: text(fields.get('URL')),
-      // Notes can be marked protected too, and then they are a secret like any
-      // other: the list gets nothing.
-      notes: isProtected(fields.get('Notes')) ? '' : text(fields.get('Notes')),
+      // Notes can be marked protected, and then they are a secret like any
+      // other and the list gets nothing. Even in the open they are cut short:
+      // people keep recovery codes in there, and the panel has no business
+      // holding those just to draw a card.
+      notes: isProtected(fields.get('Notes')) ? '' : text(fields.get('Notes')).slice(0, 300),
       group: groupPath,
       tags: Array.isArray(entry.tags) ? entry.tags.slice() : [],
       icon: typeof entry.icon === 'number' ? entry.icon : 0,

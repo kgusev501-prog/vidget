@@ -13,6 +13,9 @@ const {
   nativeImage,
   shell,
   safeStorage,
+  dialog,
+  clipboard,
+  powerMonitor,
 } = require('electron');
 
 // Transparent, always-on-top windows on Windows 11 are composited wrong on some
@@ -52,6 +55,8 @@ const { Notes } = require('./notes');
 const { YandexMusic } = require('./yandex');
 const yandexLogin = require('./yandex-login');
 const { Player } = require('./player');
+const { Vault } = require('./vault');
+const { AutoType } = require('./autotype');
 const { startServer } = require('./server');
 const { panelSize: measurePanel, slotX, slotFraction } = require('../shared/panel-size');
 const updater = require('./updater');
@@ -82,6 +87,8 @@ let hovering = false;
 let media = null;
 let clip = null;
 let notes = null;
+let vault = null;
+let autotype = null;
 let yandex = null;
 let player = null;
 let web = null; // loopback origin the panel is served from
@@ -400,6 +407,15 @@ function refreshTrayMenu() {
         },
       },
       { label: 'Панель по центру экрана', click: () => centerPanel() },
+      ...(settings.get().vaultPath
+        ? [
+            {
+              label: vault && vault.unlocked ? 'Закрыть пароли' : 'Пароли закрыты',
+              enabled: !!(vault && vault.unlocked),
+              click: () => vault.lock('из меню в трее'),
+            },
+          ]
+        : []),
       { label: 'Папка с данными', click: () => shell.openPath(app.getPath('userData')) },
       { type: 'separator' },
       { label: 'Выход', click: () => quit() },
@@ -463,7 +479,17 @@ function saveToken(token) {
 function quit() {
   if (media) media.stop();
   if (clip) clip.stop();
+  if (autotype) autotype.stop();
+  if (vault) vault.lock('выход');
   app.quit();
+}
+
+/** The auto-type sidecar exists only while a database is configured. */
+function applyVaultRunning() {
+  if (!autotype) return;
+  const wanted = !!settings.get().vaultPath;
+  if (wanted && !autotype.running) autotype.start();
+  if (!wanted && autotype.running) autotype.stop();
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -508,6 +534,8 @@ async function init() {
   notes = new Notes(noteStore);
   yandex = new YandexMusic();
   player = new Player();
+  vault = new Vault(() => settings.get());
+  autotype = new AutoType();
 
   createWindow();
   buildTray();
@@ -533,6 +561,20 @@ async function init() {
 
   media.start();
   clip.start();
+  applyVaultRunning();
+
+  vault.on('change', (st) => {
+    send('vault:status', st);
+    refreshTrayMenu(); // the tray offers to lock only while there is something open
+  });
+  vault.on('locked', (reason) => send('vault:locked', reason));
+  vault.on('reloaded', () => send('vault:list', vault.list()));
+  autotype.on('window', (w) => send('vault:window', w));
+
+  // Walking away from the machine should close the passwords, whatever the
+  // idle timer says.
+  powerMonitor.on('lock-screen', () => vault.lock('экран заблокирован'));
+  powerMonitor.on('suspend', () => vault.lock('компьютер уснул'));
 
   // Retries on its own: right after a reboot there is often no network yet.
   yandex.startAutoConnect(loadToken);
@@ -551,7 +593,7 @@ async function init() {
   // reinstalled binary keeps the registry entry pointing at the right exe.
   setAutostart(settings.get().autostart !== false);
 
-  registerHotkey(settings.get().hotkey);
+  registerHotkeys();
 
   screen.on('display-metrics-changed', reposition);
   screen.on('display-added', reposition);
@@ -562,34 +604,70 @@ async function init() {
     globalShortcut.unregisterAll();
     if (media) media.stop();
     if (clip) clip.stop();
+    if (autotype) autotype.stop();
+    if (vault) vault.lock('выход');
     for (const store of stores) store.flush();
     if (web) web.server.close();
   });
 }
 
 const HOTKEY_FALLBACKS = ['Control+Alt+Space', 'Control+Shift+Space', 'Control+Alt+Q', 'Alt+Shift+V'];
+const PASSWORD_FALLBACKS = ['Control+Alt+P', 'Control+Shift+P', 'Control+Alt+L', 'Alt+Shift+P'];
 
-/** Registers the first accelerator that Windows has not already handed out. */
-function registerHotkey(preferred) {
-  globalShortcut.unregisterAll();
-  const candidates = [preferred, ...HOTKEY_FALLBACKS].filter(Boolean);
+/**
+ * Registers the first accelerator Windows has not already handed out.
+ *
+ * @param {string} preferred what the settings ask for
+ * @param {string[]} fallbacks tried in order when it is taken
+ * @param {string} key the setting to remember the working one under
+ * @param {() => void} action
+ */
+function registerOne(preferred, fallbacks, key, action) {
+  const candidates = [preferred, ...fallbacks].filter(Boolean);
   for (const accel of candidates) {
     try {
-      if (globalShortcut.register(accel, () => toggle())) {
+      if (globalShortcut.register(accel, action)) {
         if (accel !== preferred) {
           const s = settings.get();
-          s.hotkey = accel;
+          s[key] = accel;
           settings.set(s);
         }
-        console.log('[hotkey] using', accel);
+        console.log('[hotkey]', key, '=', accel);
         return accel;
       }
     } catch (err) {
       console.error('[hotkey]', accel, err.message);
     }
   }
-  console.warn('[hotkey] no accelerator available');
+  console.warn('[hotkey] нет свободного сочетания для', key);
   return null;
+}
+
+/** Both shortcuts at once: registering one means giving up the other first. */
+function registerHotkeys() {
+  globalShortcut.unregisterAll();
+  const s = settings.get();
+  const main = registerOne(s.hotkey, HOTKEY_FALLBACKS, 'hotkey', () => toggle());
+  // The passwords shortcut only exists once there is a database to open.
+  if (s.vaultPath) {
+    registerOne(s.passwordHotkey || PASSWORD_FALLBACKS[0], PASSWORD_FALLBACKS, 'passwordHotkey', () =>
+      openPasswords()
+    );
+  }
+  return main;
+}
+
+/**
+ * The passwords hotkey: opens the panel straight onto the password list.
+ *
+ * The window the user was working in is already known — the sidecar keeps that
+ * up to date — so by the time the panel has the focus we still know where the
+ * password is meant to go.
+ */
+function openPasswords() {
+  const front = autotype && autotype.front();
+  expand();
+  send('vault:open', { window: front || null });
 }
 
 function send(channel, payload) {
@@ -695,14 +773,139 @@ function registerIpc() {
     updater.check(settings.get().updateUrl, (st) => send('app:update', st))
   );
   ipcMain.handle('app:set-setting', (_e, { key, value }) => {
+    // Настройки паролей меняются здесь же, чтобы всё хранилось в одном файле.
     const s = settings.get();
     s[key] = value;
     settings.set(s);
     if (key === 'autostart') setAutostart(value);
-    if (key === 'hotkey') registerHotkey(value);
+    if (key === 'hotkey' || key === 'passwordHotkey') registerHotkeys();
+    // A different database is a different set of passwords; the open one has
+    // to go, and the sidecar is only wanted while there is a file at all.
+    if (key === 'vaultPath' || key === 'vaultKeyFile') {
+      vault.lock('сменился файл базы');
+      applyVaultRunning();
+      registerHotkeys();
+    }
     // A smaller budget has to take effect now, not at the next copy.
     if (key === 'imageBudget') clip.sweepImages();
     return s;
   });
   ipcMain.on('app:quit', () => quit());
+
+  registerVaultIpc();
+}
+
+// --- passwords ---------------------------------------------------------------
+// Everything a password touches lives here, so there is one place to look when
+// asking what the panel can and cannot get hold of.
+
+/** How long a copied password may sit on the clipboard before being wiped. */
+const CLIP_CLEAR_MS = 30000;
+let clipClearTimer = null;
+
+function copySecret(value) {
+  if (value == null) return { ok: false, error: 'Нечего копировать' };
+  clip.writeUnrecorded(value);
+  if (clipClearTimer) clearTimeout(clipClearTimer);
+  clipClearTimer = setTimeout(() => {
+    clipClearTimer = null;
+    // Only if it is still ours: something copied since is the user's business.
+    if (clip.holds(value)) {
+      clip.clearClipboard();
+      send('vault:cleared', true);
+    }
+  }, CLIP_CLEAR_MS);
+  if (clipClearTimer.unref) clipClearTimer.unref();
+  return { ok: true, seconds: CLIP_CLEAR_MS / 1000 };
+}
+
+function registerVaultIpc() {
+  ipcMain.handle('vault:status', () => ({
+    ...vault.status(),
+    window: autotype ? autotype.front() : null,
+    hotkey: settings.get().passwordHotkey || PASSWORD_FALLBACKS[0],
+  }));
+
+  ipcMain.handle('vault:unlock', async (_e, password) => {
+    const res = await vault.unlock(password);
+    return { ...res, status: vault.status() };
+  });
+
+  ipcMain.on('vault:lock', () => vault.lock('по кнопке'));
+
+  // Always through the search, so a database with thousands of entries does
+  // not hand all of them to the panel just to fill a list nobody scrolled.
+  ipcMain.handle('vault:list', (_e, query) => vault.find(query || '', 200));
+
+  /** Entries that suit the window the user came from, best first. */
+  ipcMain.handle('vault:for-window', () => {
+    const front = autotype && autotype.front();
+    if (!front || !front.title) return { window: null, items: [] };
+    return { window: front, items: vault.forWindow(front.title) };
+  });
+
+  ipcMain.handle('vault:reveal', (_e, { id, field }) => vault.secret(id, field || 'Password'));
+  ipcMain.handle('vault:totp', (_e, id) => vault.totp(id));
+  ipcMain.handle('vault:history', (_e, id) => vault.history(id));
+
+  ipcMain.handle('vault:copy', (_e, { id, field }) => {
+    if (field === 'TOTP') {
+      const code = vault.totp(id);
+      return code ? copySecret(code.text) : { ok: false, error: 'У записи нет одноразового кода' };
+    }
+    return copySecret(vault.secret(id, field || 'Password'));
+  });
+
+  /**
+   * Types an entry into the window the user came from.
+   *
+   * The panel has to be out of the way first: Windows will not let us hand the
+   * foreground to another program, but it will put back what was there once we
+   * stop being the front window.
+   */
+  ipcMain.handle('vault:type', async (_e, id) => {
+    const front = autotype && autotype.front();
+    if (!front || !front.title) return { ok: false, error: 'Не видно, в каком окне вы работали' };
+
+    const plan = vault.plan(id, front.title);
+    if (!plan.ok) return plan;
+
+    collapse();
+    await new Promise((r) => setTimeout(r, 320));
+
+    const res = await autotype.type(plan.steps, front.title);
+    // Success speaks for itself — the password is in the form. A failure would
+    // otherwise be silent, so the panel comes back to say what went wrong.
+    if (!res.ok) {
+      expand();
+      send('vault:typed', res);
+    }
+    return res;
+  });
+
+  ipcMain.handle('vault:save-attachment', async (_e, { id, name }) => {
+    const bytes = vault.attachment(id, name);
+    if (!bytes) return { ok: false, error: 'Вложение не найдено' };
+    const picked = await dialog.showSaveDialog(win, { defaultPath: name });
+    if (picked.canceled || !picked.filePath) return { ok: false, cancelled: true };
+    try {
+      fs.writeFileSync(picked.filePath, bytes);
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+    return { ok: true, file: picked.filePath };
+  });
+
+  ipcMain.handle('vault:pick-file', async (_e, what) => {
+    const key = what === 'key';
+    const picked = await dialog.showOpenDialog(win, {
+      title: key ? 'Файл-ключ от базы' : 'База паролей KeePass',
+      properties: ['openFile'],
+      filters: key
+        ? [{ name: 'Все файлы', extensions: ['*'] }]
+        : [{ name: 'База KeePass', extensions: ['kdbx'] }, { name: 'Все файлы', extensions: ['*'] }],
+    });
+    if (picked.canceled || !picked.filePaths.length) return null;
+    return picked.filePaths[0];
+  });
 }

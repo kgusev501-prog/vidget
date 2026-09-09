@@ -455,6 +455,44 @@ class ClipboardWatcher extends EventEmitter {
     }
   }
 
+  /**
+   * Writes something to the clipboard that must not be remembered.
+   *
+   * A password put on the clipboard for pasting has no business turning up in
+   * the widget's own history, where it would sit in the open for as long as
+   * the history is kept.
+   *
+   * @param {string} text
+   * @param {number} [quietMs] how long to keep ignoring the clipboard
+   */
+  writeUnrecorded(text, quietMs = 1500) {
+    this.suppressUntil = Date.now() + quietMs;
+    this.lastSig = `t:${hash(text)}`;
+    this.dirty = false;
+    clipboard.writeText(text);
+  }
+
+  /** True while the clipboard still holds exactly what we last wrote there. */
+  holds(text) {
+    try {
+      return clipboard.readText() === text;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Empties the clipboard without recording the change. */
+  clearClipboard() {
+    this.suppressUntil = Date.now() + 1500;
+    this.lastSig = null;
+    this.dirty = false;
+    try {
+      clipboard.clear();
+    } catch {
+      /* nothing to clear */
+    }
+  }
+
   /** Put an entry back on the clipboard without re-recording it. */
   async restore(id) {
     const item = this.items.find((i) => i.id === id);

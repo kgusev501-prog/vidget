@@ -169,6 +169,13 @@ api.ui.onClose(() => {
   closeYa();
   closeSettings();
   closeMenu();
+  closeVaultEntry();
+  // Nothing about the passwords stays on screen behind a closed shade.
+  if (vaultSearch.value) {
+    vaultSearch.value = '';
+    if (vaultStatus.unlocked) refreshVaultList();
+  }
+  $('#vault-password').value = '';
   if (!noteEditor.hidden) closeNote();
 });
 
@@ -197,6 +204,7 @@ function selectTab(name) {
   api.app.setSetting('tab', name);
   if (name === 'clip') renderClips();
   if (name === 'notes') renderNotes();
+  if (name === 'vault') loadVault();
   if (name === 'yt' && !ytResults.length) ytMsg('Введите запрос и нажмите Enter');
 }
 
@@ -1629,6 +1637,455 @@ window.addEventListener('message', (e) => {
 });
 
 // ============================================================
+//  passwords
+// ============================================================
+// The panel never holds a password. It holds titles, user names and groups;
+// a value is fetched one at a time, shown for a moment, and dropped.
+const vaultSearch = $('#vault-search');
+const vaultList = $('#vault-list');
+const vaultEntry = $('#vault-entry');
+
+let vaultStatus = { configured: false, unlocked: false };
+let vaultItems = []; // what the list is showing now
+let vaultSuggested = new Map(); // id -> why it suits the window in front
+let vaultWindow = null; // the window the user came from
+let vaultCursor = -1; // which row the keyboard is on
+let vaultEntryId = null;
+let totpTimer = null;
+
+function paintVaultPanes() {
+  const setup = !vaultStatus.configured;
+  const locked = vaultStatus.configured && !vaultStatus.unlocked;
+  $('#vault-setup').hidden = !setup;
+  $('#vault-unlock').hidden = !locked;
+  $('#vault-open-pane').hidden = setup || locked;
+  $('#vault-lock').hidden = !vaultStatus.unlocked;
+
+  if (locked) {
+    const file = String(vaultStatus.file || '');
+    $('#vault-file-name').textContent = file.split(/[\/]/).pop() || file;
+  }
+  if (!vaultStatus.unlocked) {
+    vaultItems = [];
+    vaultList.textContent = '';
+    closeVaultEntry();
+  }
+}
+
+/** The strip above the list, naming where a password would be typed. */
+function paintVaultWindow() {
+  const box = $('#vault-window');
+  const title = vaultWindow && vaultWindow.title;
+  if (!title || !vaultStatus.unlocked) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  box.textContent = '';
+  box.append(document.createTextNode('Напечатать в: '));
+  const b = el('b', null, title);
+  box.append(b);
+}
+
+function vaultIconFor(item) {
+  if (item.expired) return 'clock';
+  if (item.hasTotp) return 'key';
+  return 'lock';
+}
+
+function renderVaultList() {
+  vaultList.textContent = '';
+  $('#vault-empty').style.display = vaultItems.length ? 'none' : '';
+
+  vaultItems.forEach((item, index) => {
+    const row = el('div', `prow${index === vaultCursor ? ' current' : ''}${item.expired ? ' stale' : ''}`);
+    row.dataset.id = item.id;
+
+    const icon = el('div', 'pico');
+    icon.append(svgIcon(vaultIconFor(item)));
+    row.append(icon);
+
+    const info = el('div', 'pinfo');
+    info.append(el('div', 'pname', item.title));
+    const under = [item.user, item.group].filter(Boolean).join('  ·  ');
+    info.append(el('div', 'puser', under));
+    row.append(info);
+
+    const why = vaultSuggested.get(item.id);
+    if (why) row.append(el('div', 'pwhy', why));
+
+    const acts = [['type', 'type', 'Напечатать в окно'], ['copy', 'copy', 'Скопировать пароль']];
+    if (item.hasTotp) acts.push(['totp', 'clock', 'Скопировать одноразовый код']);
+    acts.push(['open', 'expand', 'Показать запись']);
+
+    const box = el('div', 'pacts');
+    for (const [act, icon2, title] of acts) {
+      const b = el('button');
+      b.dataset.act = act;
+      b.title = title;
+      b.append(svgIcon(icon2));
+      box.append(b);
+    }
+    row.append(box);
+
+    vaultList.append(row);
+  });
+}
+
+/**
+ * Refills the list.
+ *
+ * With an empty search box the entries that suit the window in front come
+ * first — that is the whole point of opening this by hotkey. Once the user
+ * types, it is a plain search over everything.
+ */
+async function refreshVaultList(keepCursor = false) {
+  if (!vaultStatus.unlocked) return;
+  const query = vaultSearch.value.trim();
+  vaultSuggested = new Map();
+
+  let items = [];
+  if (!query) {
+    const suited = await api.vault.forWindow();
+    vaultWindow = suited.window || vaultWindow;
+    for (const hit of suited.items) vaultSuggested.set(hit.entry.id, hit.why);
+    const rest = await api.vault.list('');
+    const seen = new Set(suited.items.map((h) => h.entry.id));
+    items = [...suited.items.map((h) => h.entry), ...rest.filter((e) => !seen.has(e.id))];
+  } else {
+    items = await api.vault.list(query);
+  }
+
+  vaultItems = items;
+  if (!keepCursor) vaultCursor = items.length ? 0 : -1;
+  else vaultCursor = Math.min(vaultCursor, items.length - 1);
+  renderVaultList();
+  paintVaultWindow();
+}
+
+async function loadVault(focusSearch = false) {
+  vaultStatus = await api.vault.status();
+  vaultWindow = vaultStatus.window || vaultWindow;
+  paintVaultPanes();
+  paintVaultWindow();
+  if (vaultStatus.unlocked) await refreshVaultList();
+  if (focusSearch) {
+    const box = vaultStatus.unlocked ? vaultSearch : $('#vault-password');
+    setTimeout(() => box.focus(), 60);
+  }
+}
+
+// --- doing something with an entry -----------------------------------------
+async function vaultCopy(id, field, what) {
+  const res = await api.vault.copy(id, field);
+  if (!res || !res.ok) return toast((res && res.error) || 'Не удалось скопировать');
+  toast(`${what} в буфере — сотрётся через ${res.seconds} с`);
+}
+
+/**
+ * Types the entry into the window the user came from.
+ *
+ * The panel closes on its way: Windows puts back whatever was in front, and
+ * only then may anything be typed.
+ */
+async function vaultType(id) {
+  if (!vaultWindow || !vaultWindow.title) return toast('Не видно, в каком окне вы работали');
+  const res = await api.vault.type(id);
+  // A refusal comes back through vault:onTyped as well, with the panel
+  // reopened; success needs nothing said — the password is already in the form.
+  if (res && !res.ok && !res.error) toast('Не удалось напечатать');
+}
+
+vaultList.addEventListener('click', (e) => {
+  const row = e.target.closest('.prow');
+  if (!row) return;
+  const id = row.dataset.id;
+  const act = e.target.dataset.act;
+  if (act === 'copy') return vaultCopy(id, 'Password', 'Пароль');
+  if (act === 'totp') return vaultCopy(id, 'TOTP', 'Код');
+  if (act === 'type') return vaultType(id);
+  openVaultEntry(id);
+});
+
+vaultSearch.addEventListener('input', () => refreshVaultList());
+
+vaultSearch.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (!vaultItems.length) return;
+    vaultCursor = (vaultCursor + (e.key === 'ArrowDown' ? 1 : -1) + vaultItems.length) % vaultItems.length;
+    renderVaultList();
+    const row = vaultList.children[vaultCursor];
+    if (row) row.scrollIntoView({ block: 'nearest' });
+    return;
+  }
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const item = vaultItems[vaultCursor];
+  if (!item) return;
+  // Enter types it; Shift+Enter copies instead, for the places where synthetic
+  // typing is not welcome.
+  if (e.shiftKey) vaultCopy(item.id, 'Password', 'Пароль');
+  else vaultType(item.id);
+});
+
+$('#vault-lock').addEventListener('click', () => {
+  api.vault.lock();
+  toast('Пароли закрыты');
+});
+
+$('#vault-pick').addEventListener('click', () => pickVaultFile());
+
+// --- unlocking --------------------------------------------------------------
+$('#vault-unlock').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const box = $('#vault-password');
+  const msg = $('#vault-unlock-msg');
+  const button = $('#vault-open');
+  if (!box.value) return;
+
+  button.disabled = true;
+  msg.textContent = 'Открываем…';
+  const res = await api.vault.unlock(box.value);
+  // The master password has no business staying in a text box on a window that
+  // sits above everything else on the screen.
+  box.value = '';
+  button.disabled = false;
+
+  if (!res || !res.ok) {
+    msg.textContent = (res && res.error) || 'Не удалось открыть';
+    box.focus();
+    return;
+  }
+  msg.textContent = '';
+  vaultStatus = res.status;
+  paintVaultPanes();
+  await refreshVaultList();
+  setTimeout(() => vaultSearch.focus(), 40);
+});
+
+// --- one entry, in full -----------------------------------------------------
+function stopTotpTimer() {
+  if (totpTimer) clearInterval(totpTimer);
+  totpTimer = null;
+}
+
+function fieldRow(name, value, options = {}) {
+  const row = el('div', 'vfield');
+  row.append(el('div', 'vname', name));
+  const box = el('div', `vvalue${options.mono ? ' mono' : ''}`, value);
+  row.append(box);
+  const acts = el('div', 'vacts');
+  row.append(acts);
+  return { row, box, acts };
+}
+
+function actionButton(icon, title, onClick) {
+  const b = el('button');
+  b.title = title;
+  b.append(svgIcon(icon));
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+/** Shows a secret for a moment, then puts the dots back. */
+function revealRow(box, button, fetch, seconds = 10) {
+  let shown = false;
+  let timer = null;
+  const hide = () => {
+    shown = false;
+    clearTimeout(timer);
+    box.textContent = '••••••••••';
+    box.classList.add('hidden-value');
+    button.querySelector('use').setAttribute('href', '#i-eye');
+  };
+  button.addEventListener('click', async () => {
+    if (shown) return hide();
+    const value = await fetch();
+    if (value == null) return toast('Значение не найдено');
+    shown = true;
+    box.textContent = value;
+    box.classList.remove('hidden-value');
+    button.querySelector('use').setAttribute('href', '#i-eye-off');
+    // This window sits above everything else: a password left showing here is
+    // a password shown to whoever walks past.
+    timer = setTimeout(hide, seconds * 1000);
+  });
+  return hide;
+}
+
+async function openVaultEntry(id) {
+  const item = vaultItems.find((e) => e.id === id);
+  if (!item) return;
+  vaultEntryId = id;
+  stopTotpTimer();
+
+  $('#ve-title').textContent = item.title + (item.group ? `  ·  ${item.group}` : '');
+  const body = $('#ve-body');
+  body.textContent = '';
+
+  if (item.user) {
+    const { row, acts } = fieldRow('Логин', item.user);
+    acts.append(actionButton('copy', 'Скопировать логин', () => vaultCopy(id, 'UserName', 'Логин')));
+    body.append(row);
+  }
+
+  if (item.hasPassword) {
+    const { row, box, acts } = fieldRow('Пароль', '••••••••••', { mono: true });
+    box.classList.add('hidden-value');
+    const eye = actionButton('eye', 'Показать на десять секунд', () => {});
+    acts.append(eye);
+    revealRow(box, eye, () => api.vault.reveal(id, 'Password'));
+    acts.append(actionButton('copy', 'Скопировать пароль', () => vaultCopy(id, 'Password', 'Пароль')));
+    body.append(row);
+  }
+
+  if (item.url) {
+    const { row, acts } = fieldRow('Адрес', item.url);
+    acts.append(actionButton('copy', 'Скопировать адрес', () => vaultCopy(id, 'URL', 'Адрес')));
+    body.append(row);
+  }
+
+  if (item.hasTotp) {
+    const { row, box, acts } = fieldRow('Одноразовый код', '……', { mono: true });
+    const bar = el('div', 'totp-left');
+    const fill = el('i');
+    bar.append(fill);
+    row.insertBefore(bar, acts);
+    acts.append(actionButton('copy', 'Скопировать код', () => vaultCopy(id, 'TOTP', 'Код')));
+    body.append(row);
+
+    const tick = async () => {
+      const code = await api.vault.totp(id);
+      if (!code) return;
+      box.textContent = code.text;
+      fill.style.width = `${Math.round((code.secondsLeft / code.period) * 100)}%`;
+    };
+    tick();
+    totpTimer = setInterval(tick, 1000);
+  }
+
+  for (const field of item.customFields) {
+    // The one-time secret is shown as a code above, not as its raw seed.
+    if (field.name === 'otp' || field.name === 'TOTP Seed' || field.name === 'TOTP Settings') continue;
+    const { row, box, acts } = fieldRow(field.name, field.protected ? '••••••••••' : '…');
+    if (field.protected) {
+      box.classList.add('hidden-value');
+      const eye = actionButton('eye', 'Показать на десять секунд', () => {});
+      acts.append(eye);
+      revealRow(box, eye, () => api.vault.reveal(id, field.name));
+    } else {
+      api.vault.reveal(id, field.name).then((v) => {
+        box.textContent = v == null ? '' : v;
+      });
+    }
+    acts.append(actionButton('copy', 'Скопировать', () => vaultCopy(id, field.name, field.name)));
+    body.append(row);
+  }
+
+  if (item.notes) {
+    const { row, box } = fieldRow('Заметки', item.notes);
+    box.style.whiteSpace = 'pre-wrap';
+    body.append(row);
+  }
+
+  if (item.attachments.length) {
+    body.append(el('div', 'vgroup', 'Вложения'));
+    for (const name of item.attachments) {
+      const { row, acts } = fieldRow(name, '');
+      acts.append(
+        actionButton('attach', 'Сохранить на диск', async () => {
+          const res = await api.vault.saveAttachment(id, name);
+          if (res && res.ok) toast('Сохранено');
+          else if (res && !res.cancelled) toast(res.error || 'Не удалось сохранить');
+        })
+      );
+      body.append(row);
+    }
+  }
+
+  if (item.history) {
+    const past = await api.vault.history(id);
+    if (past.length) {
+      body.append(el('div', 'vgroup', `Прежние версии записи: ${past.length}`));
+      for (const old of past.slice(0, 5)) {
+        body.append(fieldRow(old.modified ? timeAgo(old.modified) : 'когда-то', old.user || '—').row);
+      }
+    }
+  }
+
+  const marks = [];
+  if (item.expired) marks.push('срок записи истёк');
+  if (item.tags.length) marks.push(`метки: ${item.tags.join(', ')}`);
+  if (!item.autoType.enabled) marks.push('автоввод для неё выключен');
+  if (marks.length) body.append(el('div', 'vgroup', marks.join('  ·  ')));
+
+  vaultEntry.hidden = false;
+}
+
+function closeVaultEntry() {
+  stopTotpTimer();
+  vaultEntryId = null;
+  vaultEntry.hidden = true;
+}
+
+$('#ve-back').addEventListener('click', closeVaultEntry);
+$('#ve-type').addEventListener('click', () => {
+  if (vaultEntryId) vaultType(vaultEntryId);
+});
+
+// --- choosing the file ------------------------------------------------------
+async function pickVaultFile(what) {
+  const file = await api.vault.pickFile(what);
+  if (!file) return;
+  await api.app.setSetting(what === 'key' ? 'vaultKeyFile' : 'vaultPath', file);
+  await loadVault(true);
+  paintSettings();
+}
+
+// --- what the main process tells us ----------------------------------------
+api.vault.onStatus((st) => {
+  vaultStatus = st;
+  paintVaultPanes();
+  if (activeTab === 'vault' && st.unlocked) refreshVaultList(true);
+});
+
+api.vault.onWindow((w) => {
+  vaultWindow = w;
+  if (activeTab === 'vault') {
+    paintVaultWindow();
+    // With an empty search box the list is ordered by what suits the window,
+    // so a new window means a new order.
+    if (!vaultSearch.value.trim()) refreshVaultList(true);
+  }
+});
+
+api.vault.onLocked((reason) => {
+  vaultStatus = { ...vaultStatus, unlocked: false };
+  paintVaultPanes();
+  if (activeTab === 'vault') toast(`Пароли закрыты: ${reason}`);
+});
+
+api.vault.onList(() => {
+  if (activeTab === 'vault') refreshVaultList(true);
+});
+
+api.vault.onTyped((res) => {
+  if (!res || res.ok) return;
+  toast(res.error || 'Не удалось напечатать');
+});
+
+api.vault.onCleared(() => toast('Пароль стёрт из буфера обмена'));
+
+// Opened by its own hotkey: straight to the passwords, with the cursor where
+// typing will do something.
+api.vault.onOpen((payload) => {
+  if (payload && payload.window) vaultWindow = payload.window;
+  selectTab('vault');
+  loadVault(true);
+});
+
+// ============================================================
 //  settings and the first run
 // ============================================================
 const settingsPane = $('#settings');
@@ -1679,6 +2136,21 @@ async function paintSettings() {
   $('#set-account').textContent = yaStatus.connected
     ? `— ${yaStatus.login || 'подключён'}`
     : '— не подключён';
+
+  const shortFile = (p) => (p ? String(p).split(/[\/]/).pop() : '');
+  $('#set-vault-file').textContent = s.vaultPath ? `— ${shortFile(s.vaultPath)}` : '— не выбрана';
+  $('#set-vault-key').textContent = s.vaultKeyFile ? `— ${shortFile(s.vaultKeyFile)}` : '— не обязательно';
+  $('#set-vault-lock').value = String(s.vaultLockMinutes == null ? 10 : s.vaultLockMinutes);
+
+  const passHotkey = s.passwordHotkey || 'Control+Alt+P';
+  const passPicker = $('#set-vault-hotkey');
+  if (!passPicker.querySelector(`option[value="${passHotkey}"]`)) {
+    const extra = document.createElement('option');
+    extra.value = passHotkey;
+    extra.textContent = passHotkey;
+    passPicker.append(extra);
+  }
+  passPicker.value = passHotkey;
 }
 
 function openSettings() {
@@ -1720,6 +2192,32 @@ $('#set-update-url').addEventListener('change', (e) =>
 api.app.onUpdate((st) => {
   $('#set-update').textContent = st && st.message ? `— ${st.message}` : '';
   if (st && st.downloaded) toast('Обновление готово, встанет при выходе');
+});
+
+$('#set-vault-pick').addEventListener('click', () => pickVaultFile());
+$('#set-vault-key-pick').addEventListener('click', () => pickVaultFile('key'));
+
+$('#set-vault-clear').addEventListener('click', async () => {
+  await api.app.setSetting('vaultPath', '');
+  await loadVault();
+  paintSettings();
+  toast('База паролей отключена');
+});
+
+$('#set-vault-key-clear').addEventListener('click', async () => {
+  await api.app.setSetting('vaultKeyFile', '');
+  await loadVault();
+  paintSettings();
+});
+
+$('#set-vault-lock').addEventListener('change', (e) =>
+  api.app.setSetting('vaultLockMinutes', Number(e.target.value))
+);
+
+$('#set-vault-hotkey').addEventListener('change', async (e) => {
+  const next = await api.app.setSetting('passwordHotkey', e.target.value);
+  toast(next.passwordHotkey === e.target.value ? 'Сочетание для паролей изменено' : 'Сочетание занято, выбрано другое');
+  paintSettings();
 });
 
 $('#set-center').addEventListener('click', () => {
@@ -1839,6 +2337,7 @@ function toast(text) {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (!$('#preview').hidden) return hidePreview();
+    if (!vaultEntry.hidden) return closeVaultEntry();
     if (!welcomePane.hidden) return closeWelcome();
     if (!settingsPane.hidden) return closeSettings();
     if (!yaPanel.hidden) return closeYa();
@@ -1852,6 +2351,7 @@ document.addEventListener('keydown', (e) => {
       clip: '#clip-search',
       yt: '#yt-search',
       notes: '#note-search',
+      vault: '#vault-search',
     }[activeTab];
     const node = box && $(box);
     if (node) {
