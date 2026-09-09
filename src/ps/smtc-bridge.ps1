@@ -462,7 +462,7 @@ while ($true) {
             # The same line used to go out twice a second whether anything had
             # changed or not, and every one of them was parsed, handed across to
             # the panel and turned into work there. The panel runs its own clock
-            # between reports, so only a real change needs saying out loud — and
+            # between reports, so only a real change needs saying out loud - and
             # a heartbeat, which is what keeps that clock honest.
             $sig = @(
                 $state.app, $key, $state.status, $dur,

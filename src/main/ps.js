@@ -61,12 +61,18 @@ function runPs(name, args = [], { timeout = 8000, sta = false } = {}) {
   });
 }
 
-/** Starts a long-lived helper script and hands back the child process. */
-function spawnPs(name, args = [], { sta = false } = {}) {
+/**
+ * Starts a long-lived helper script and hands back the child process.
+ *
+ * Standard input is left unconnected unless asked for: a script that never
+ * reads it should not be able to sit waiting on it, and one that does needs the
+ * pipe both to be talked to and to notice when the widget goes away.
+ */
+function spawnPs(name, args = [], { sta = false, stdin = false } = {}) {
   const flags = ['-NoProfile', '-NonInteractive'];
   if (sta) flags.push('-STA');
   flags.push('-ExecutionPolicy', 'Bypass', '-File', scriptPath(name), ...args);
-  return spawn(PS, flags, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  return spawn(PS, flags, { windowsHide: true, stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
 }
 
 module.exports = { runPs, spawnPs, scriptPath, PS };
