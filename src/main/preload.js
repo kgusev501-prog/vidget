@@ -85,9 +85,11 @@ contextBridge.exposeInMainWorld('vidget', {
     // One secret at a time, and only when something asks: the list the panel
     // holds never contains a password.
     reveal: (id, field) => ipcRenderer.invoke('vault:reveal', { id, field }),
-    copy: (id, field) => ipcRenderer.invoke('vault:copy', { id, field }),
+    copy: (id, field, pastIndex) => ipcRenderer.invoke('vault:copy', { id, field, pastIndex }),
     totp: (id) => ipcRenderer.invoke('vault:totp', id),
     history: (id) => ipcRenderer.invoke('vault:history', id),
+    past: (id, index, field) => ipcRenderer.invoke('vault:past', { id, index, field }),
+    openUrl: (id) => ipcRenderer.invoke('vault:open-url', id),
     type: (id) => ipcRenderer.invoke('vault:type', id),
     saveAttachment: (id, name) => ipcRenderer.invoke('vault:save-attachment', { id, name }),
     pickFile: (what) => ipcRenderer.invoke('vault:pick-file', what),

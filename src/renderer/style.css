@@ -1873,3 +1873,11 @@ body.no-media #repeat {
   color: var(--fg-dim);
   font-size: 12px;
 }
+
+/* An icon carried by the entry itself, in place of our own. */
+.prow .pico img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  display: block;
+}

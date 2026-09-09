@@ -1702,7 +1702,16 @@ function renderVaultList() {
     row.dataset.id = item.id;
 
     const icon = el('div', 'pico');
-    icon.append(svgIcon(vaultIconFor(item)));
+    if (item.iconData) {
+      // The icon the entry carries in the database — that is how its owner
+      // picks it out of a list without reading.
+      const img = document.createElement('img');
+      img.src = item.iconData;
+      img.alt = '';
+      icon.append(img);
+    } else {
+      icon.append(svgIcon(vaultIconFor(item)));
+    }
     row.append(icon);
 
     const info = el('div', 'pinfo');
@@ -1776,8 +1785,8 @@ async function loadVault(focusSearch = false) {
 }
 
 // --- doing something with an entry -----------------------------------------
-async function vaultCopy(id, field, what) {
-  const res = await api.vault.copy(id, field);
+async function vaultCopy(id, field, what, pastIndex) {
+  const res = await api.vault.copy(id, field, pastIndex);
   if (!res || !res.ok) return toast((res && res.error) || 'Не удалось скопировать');
   toast(`${what} в буфере — сотрётся через ${res.seconds} с`);
 }
@@ -1947,6 +1956,12 @@ async function openVaultEntry(id) {
 
   if (item.url) {
     const { row, acts } = fieldRow('Адрес', item.url);
+    acts.append(
+      actionButton('expand', 'Открыть в браузере', async () => {
+        const res = await api.vault.openUrl(id);
+        if (res && !res.ok) toast(res.error);
+      })
+    );
     acts.append(actionButton('copy', 'Скопировать адрес', () => vaultCopy(id, 'URL', 'Адрес')));
     body.append(row);
   }
@@ -2012,9 +2027,27 @@ async function openVaultEntry(id) {
   if (item.history) {
     const past = await api.vault.history(id);
     if (past.length) {
+      // The reason to open the history is almost always that the new password
+      // has not reached somewhere yet, so the old one has to be gettable.
       body.append(el('div', 'vgroup', `Прежние версии записи: ${past.length}`));
       for (const old of past.slice(0, 5)) {
-        body.append(fieldRow(old.modified ? timeAgo(old.modified) : 'когда-то', old.user || '—').row);
+        const { row, box, acts } = fieldRow(
+          old.modified ? timeAgo(old.modified) : 'когда-то',
+          old.hasPassword ? '••••••••••' : old.user || '—',
+          { mono: old.hasPassword }
+        );
+        if (old.hasPassword) {
+          box.classList.add('hidden-value');
+          const eye = actionButton('eye', 'Показать прежний пароль', () => {});
+          acts.append(eye);
+          revealRow(box, eye, () => api.vault.past(id, old.index, 'Password'));
+          acts.append(
+            actionButton('copy', 'Скопировать прежний пароль', () =>
+              vaultCopy(id, 'Password', 'Прежний пароль', old.index)
+            )
+          );
+        }
+        body.append(row);
       }
     }
   }

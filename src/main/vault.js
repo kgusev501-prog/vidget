@@ -326,6 +326,10 @@ class Vault extends EventEmitter {
       group: groupPath,
       tags: Array.isArray(entry.tags) ? entry.tags.slice() : [],
       icon: typeof entry.icon === 'number' ? entry.icon : 0,
+      // A custom icon from the database, small enough to travel as it is.
+      // KeePass users pick these to tell entries apart at a glance, and a list
+      // that drops them is a list they cannot read as quickly.
+      iconData: this._customIcon(entry),
       hasPassword: !!fields.get('Password'),
       hasTotp: !!totp.readConfig(fields),
       fieldNames: custom.map((c) => c.name),
@@ -343,6 +347,17 @@ class Vault extends EventEmitter {
         items,
       },
     };
+  }
+
+  /** The entry's own icon out of the database, as something an <img> can show. */
+  _customIcon(entry) {
+    const uuid = entry.customIcon && entry.customIcon.id;
+    if (!uuid || !this.db.meta.customIcons) return null;
+    const icon = this.db.meta.customIcons.get(uuid);
+    const data = icon && (icon.data || icon);
+    if (!data || !data.byteLength) return null;
+    if (data.byteLength > 64 * 1024) return null; // an icon, not a photograph
+    return `data:image/png;base64,${Buffer.from(new Uint8Array(data)).toString('base64')}`;
   }
 
   /** Everything the panel may see: titles and user names, never a secret. */
@@ -374,8 +389,29 @@ class Vault extends EventEmitter {
    * "{REF:P@I:hex-uuid}" means "the password of that entry". Resolved here, or
    * the widget would type the reference itself into a login form.
    */
-  _resolveRefs(value, depth = 0) {
-    if (depth > 3 || typeof value !== 'string' || value.indexOf('{REF:') < 0) return value;
+  _resolveRefs(value, depth = 0, self = null) {
+    if (depth > 3 || typeof value !== 'string' || value.indexOf('{') < 0) return value;
+
+    // KeePass also lets a field quote the entry it belongs to: a URL of
+    // "https://{S:host}/login" or a user name of "{TITLE}-admin" is ordinary
+    // in a real database, and typing the braces themselves would be wrong.
+    if (self && value.indexOf('{') >= 0) {
+      const OWN = { TITLE: 'Title', USERNAME: 'UserName', URL: 'URL', PASSWORD: 'Password', NOTES: 'Notes' };
+      value = value.replace(/[{]([A-Za-zА-Яа-я0-9 _:-]{1,64})[}]/g, (whole, name) => {
+        const upper = name.toUpperCase();
+        if (OWN[upper]) {
+          const held = self.fields.get(OWN[upper]);
+          return held == null ? whole : this._resolveRefs(text(held), depth + 1);
+        }
+        if (/^S:/i.test(name)) {
+          const held = self.fields.get(name.slice(2));
+          return held == null ? whole : this._resolveRefs(text(held), depth + 1);
+        }
+        return whole;
+      });
+    }
+
+    if (value.indexOf('{REF:') < 0) return value;
 
     const WANT = { T: 'Title', U: 'UserName', P: 'Password', A: 'URL', N: 'Notes' };
     return value.replace(/[{]REF:([TUPANI])@([TUPANIO]):([^}]*)[}]/gi, (whole, want, where, needle) => {
@@ -410,7 +446,7 @@ class Vault extends EventEmitter {
     if (!held) return null;
     const value = held.entry.fields.get(field);
     if (value == null) return null;
-    return this._resolveRefs(text(value));
+    return this._resolveRefs(text(value), 0, held.entry);
   }
 
   /** The current one-time code, if the entry carries a secret for one. */
@@ -436,18 +472,38 @@ class Vault extends EventEmitter {
     return null;
   }
 
-  /** Previous passwords KeePass kept when the entry was edited. */
+  /**
+   * Previous versions KeePass kept when the entry was edited, newest first.
+   *
+   * The old passwords are in there — that is the whole point of the history,
+   * and the reason someone opens it is usually that the new one does not work
+   * somewhere yet. They are not sent along, only counted: like every other
+   * secret, one is handed over when asked for by number.
+   */
   history(id) {
     this.touch();
     const held = this.byId.get(id);
     if (!held) return [];
-    return (held.entry.history || [])
-      .map((old) => ({
+    const all = held.entry.history || [];
+    return all
+      .map((old, index) => ({
+        index,
         modified: old.times && old.times.lastModTime ? old.times.lastModTime.getTime() : null,
         user: text(old.fields.get('UserName')),
         hasPassword: !!old.fields.get('Password'),
       }))
       .reverse();
+  }
+
+  /** One field of one older version of an entry. */
+  pastSecret(id, index, field = 'Password') {
+    this.touch();
+    const held = this.byId.get(id);
+    if (!held) return null;
+    const old = (held.entry.history || [])[index];
+    if (!old) return null;
+    const value = old.fields.get(field);
+    return value == null ? null : text(value);
   }
 
   // --- what to type ---------------------------------------------------------

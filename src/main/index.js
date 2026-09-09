@@ -859,13 +859,30 @@ function registerVaultIpc() {
   ipcMain.handle('vault:reveal', (_e, { id, field }) => vault.secret(id, field || 'Password'));
   ipcMain.handle('vault:totp', (_e, id) => vault.totp(id));
   ipcMain.handle('vault:history', (_e, id) => vault.history(id));
+  ipcMain.handle('vault:past', (_e, { id, index, field }) => vault.pastSecret(id, index, field));
 
-  ipcMain.handle('vault:copy', (_e, { id, field }) => {
+  /** Opens the entry's address in the browser, the way KeePass does. */
+  ipcMain.handle('vault:open-url', (_e, id) => {
+    const url = vault.secret(id, 'URL');
+    if (!url) return { ok: false, error: 'У записи нет адреса' };
+    const full = /^[a-z][w+.-]*:/i.test(url) ? url : `https://${url}`;
+    // Only the two schemes a browser should be handed. A kdbx in the wild can
+    // hold anything at all in that field, including a command line.
+    if (!/^https?:/i.test(full)) return { ok: false, error: 'Такой адрес виджет не открывает' };
+    shell.openExternal(full);
+    return { ok: true };
+  });
+
+  ipcMain.handle('vault:copy', (_e, { id, field, pastIndex }) => {
     if (field === 'TOTP') {
       const code = vault.totp(id);
       return code ? copySecret(code.text) : { ok: false, error: 'У записи нет одноразового кода' };
     }
-    return copySecret(vault.secret(id, field || 'Password'));
+    // An older version of the entry goes through the same door, so it is wiped
+    // from the clipboard on the same timer as everything else.
+    const value =
+      pastIndex == null ? vault.secret(id, field || 'Password') : vault.pastSecret(id, pastIndex, field || 'Password');
+    return copySecret(value);
   });
 
   /**

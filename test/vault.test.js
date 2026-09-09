@@ -305,3 +305,46 @@ test('база: правки в KeePass подхватываются без по
   assert.ok(vault.list().some((e) => e.title === 'Новая запись'));
   vault.lock();
 });
+
+// ── the rest of what a KeePass entry can hold ──────────────────────────────
+test('поля: запись может ссылаться сама на себя', async () => {
+  const creds = new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString(PASSWORD), null);
+  const db = kdbxweb.Kdbx.create(creds, 'Подстановки');
+  const e = db.createEntry(db.getDefaultGroup());
+  e.fields.set('Title', 'почта');
+  e.fields.set('UserName', '{TITLE}-admin');
+  e.fields.set('узел', 'mail.example.com');
+  e.fields.set('URL', 'https://{S:узел}/login');
+  e.fields.set('Password', kdbxweb.ProtectedValue.fromString('секрет'));
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'vidget-ref-')), 'p.kdbx');
+  fs.writeFileSync(file, Buffer.from(await db.save()));
+
+  const { vault } = await openVault(file);
+  const id = vault.list()[0].id;
+  assert.equal(vault.secret(id, 'UserName'), 'почта-admin');
+  assert.equal(vault.secret(id, 'URL'), 'https://mail.example.com/login');
+  vault.lock();
+});
+
+test('история: прежний пароль достаётся по номеру', async () => {
+  const creds = new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString(PASSWORD), null);
+  const db = kdbxweb.Kdbx.create(creds, 'История');
+  const e = db.createEntry(db.getDefaultGroup());
+  e.fields.set('Title', 'Банк');
+  e.fields.set('UserName', 'ivan');
+  e.fields.set('Password', kdbxweb.ProtectedValue.fromString('старый'));
+  e.pushHistory();
+  e.fields.set('Password', kdbxweb.ProtectedValue.fromString('новый'));
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'vidget-hist-')), 'h.kdbx');
+  fs.writeFileSync(file, Buffer.from(await db.save()));
+
+  const { vault } = await openVault(file);
+  const id = vault.list()[0].id;
+  const past = vault.history(id);
+  assert.equal(past.length, 1);
+  assert.equal(past[0].hasPassword, true);
+  assert.equal(vault.secret(id), 'новый', 'сейчас действует новый');
+  assert.equal(vault.pastSecret(id, past[0].index), 'старый', 'а прежний доступен отдельно');
+  assert.equal(vault.pastSecret(id, 99), null);
+  vault.lock();
+});
