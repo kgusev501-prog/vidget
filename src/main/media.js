@@ -19,8 +19,13 @@ const PS = process.env.SystemRoot
  * dies.
  */
 class MediaBridge extends EventEmitter {
-  constructor() {
+  /** @param {string} [appId] the widget's own media session id, so the bridge can tell it apart */
+  constructor(appId = '') {
     super();
+    this.appId = appId;
+    // Whether anyone is looking at the panel. The bridge reports less often
+    // when nobody is, and has to be told again if it ever restarts.
+    this.watching = 'closed';
     this.proc = null;
     this.buf = '';
     this.state = { active: false };
@@ -40,7 +45,16 @@ class MediaBridge extends EventEmitter {
 
     this.proc = spawn(
       PS,
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', BRIDGE],
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        BRIDGE,
+        '-OwnAppId',
+        this.appId || '',
+      ],
       { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }
     );
 
@@ -98,11 +112,14 @@ class MediaBridge extends EventEmitter {
         console.error('[smtc]', msg.where, msg.message);
         break;
       case 'ready':
+        // A fresh sidecar assumes the panel is open; tell it what is true.
+        this.send('watch', this.watching);
         break;
     }
   }
 
   send(cmd, arg) {
+    if (cmd === 'watch') this.watching = arg === 'open' ? 'open' : 'closed';
     if (!this.proc || !this.proc.stdin.writable) return false;
     try {
       this.proc.stdin.write(`${JSON.stringify({ cmd, arg })}\n`);

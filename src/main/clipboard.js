@@ -67,6 +67,7 @@ class ClipboardWatcher extends EventEmitter {
     this.watcher = null;
     this.watcherBuf = '';
     this.origin = null; // loopback origin the panel is served from
+    this.clipPrefix = '/clip'; // where pictures are mounted on that origin
 
     // Gate on the clipboard sequence number. Until the watcher reports one,
     // every tick reads — that is the old behaviour, and the right fallback if
@@ -87,8 +88,9 @@ class ClipboardWatcher extends EventEmitter {
   }
 
   /** The panel's origin, once the loopback server is up. */
-  setOrigin(origin) {
+  setOrigin(origin, clipPrefix) {
     this.origin = origin || null;
+    if (clipPrefix) this.clipPrefix = clipPrefix;
   }
 
   get budget() {
@@ -118,7 +120,9 @@ class ClipboardWatcher extends EventEmitter {
   _startWatcher() {
     if (this.watcher) return;
     try {
-      this.watcher = spawnPs('clip-files.ps1', ['-Mode', 'watch'], { sta: true });
+      this.watcher = spawnPs('clip-files.ps1', ['-Mode', 'watch', '-ParentPid', String(process.pid)], {
+        sta: true,
+      });
     } catch (err) {
       console.error('[clipboard] file watcher failed to start', err.message);
       this.watcher = null;
@@ -408,6 +412,10 @@ class ClipboardWatcher extends EventEmitter {
         if (files++ < MAX_FILES) keep.push(it);
       } else if (texts++ < limit) {
         keep.push(it);
+      } else {
+        // A long paste lives in a file of its own; dropping the entry without
+        // saying so left that file on disk until the next restart tidied up.
+        this._unlink(it);
       }
     }
     return keep;
@@ -526,7 +534,7 @@ class ClipboardWatcher extends EventEmitter {
    * from, and the bytes have to be inlined instead.
    */
   _imageUrl(name) {
-    if (this.origin) return `${this.origin}/clip/${name}`;
+    if (this.origin) return `${this.origin}${this.clipPrefix}/${name}`;
     try {
       const png = fs.readFileSync(path.join(this.imageDir, name));
       return `data:image/png;base64,${png.toString('base64')}`;

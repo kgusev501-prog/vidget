@@ -16,7 +16,12 @@
 param(
     [ValidateSet('watch', 'read', 'write')]
     [string]$Mode = 'read',
-    [string]$ListFile
+    [string]$ListFile,
+    # The process that started us. Nothing else closes this window: the watcher
+    # is started with no standard input, so there is no end-of-input to notice
+    # when the widget goes away, and a crash used to leave PowerShell running
+    # until the machine was restarted.
+    [int]$ParentPid = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,8 +59,15 @@ public static class ClipSeq {
         # tick, which is exactly the work this whole signal exists to avoid.
         Emit @{ type = 'ready'; n = [double]$last }
 
+        $beat = 0
         while ($true) {
             Start-Sleep -Milliseconds 350
+
+            $beat++
+            if ($ParentPid -gt 0 -and ($beat % 6) -eq 0) {
+                if (-not (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) { exit 0 }
+            }
+
             $seq = [ClipSeq]::GetClipboardSequenceNumber()
             if ($seq -eq $last) { continue }
             $last = $seq

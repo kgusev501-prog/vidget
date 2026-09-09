@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
@@ -34,6 +35,12 @@ const TYPES = {
 function startServer(mounts = {}) {
   const IMAGES = mounts.clipImages ? path.resolve(mounts.clipImages) : null;
 
+  // Loopback is not the same as private: any program on the machine can walk
+  // the ports and ask for things by name. Pictures out of the clipboard sit
+  // behind a folder name that only this run of the widget knows.
+  const token = crypto.randomBytes(16).toString('hex');
+  const clipRe = new RegExp(`^clip/${token}/([A-Za-z0-9]{1,40}(?:\\.thumb)?\\.png)$`);
+
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
       // Bound to loopback already; refuse anything addressed by another name so
@@ -48,7 +55,7 @@ function startServer(mounts = {}) {
       const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
 
       let file;
-      const clip = /^clip\/([A-Za-z0-9]{1,40}(?:\.thumb)?\.png)$/.exec(rel);
+      const clip = clipRe.exec(rel);
       if (clip) {
         // Pictures are addressed by id only — no path of any kind gets through.
         if (!IMAGES) {
@@ -101,7 +108,7 @@ function startServer(mounts = {}) {
 
     server.listen(0, '127.0.0.1', () => {
       const { port } = server.address();
-      resolve({ server, port, origin: `http://127.0.0.1:${port}` });
+      resolve({ server, port, origin: `http://127.0.0.1:${port}`, clipPrefix: `/clip/${token}` });
     });
   });
 }

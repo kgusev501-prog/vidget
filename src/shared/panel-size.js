@@ -30,4 +30,29 @@ function panelSize(area) {
   return { width, shade, height };
 }
 
-module.exports = { panelSize, MAX_W, MIN_W, MAX_SHADE, MIN_SHADE };
+/**
+ * Where the strip sits along the top of a work area, from a remembered share
+ * of the room it has to move in.
+ *
+ * The strip is dragged in screen coordinates but remembered as a fraction: a
+ * monitor unplugged, resized or rescaled would otherwise leave the widget
+ * parked off the edge of whatever is left. 0 is hard left, 1 hard right, and
+ * anything missing means the middle — where it has always started.
+ */
+function slotX(area, width, fraction) {
+  const left = (area && area.x) || 0;
+  const span = Math.max(0, ((area && area.width) || 0) - width);
+  const f = Number.isFinite(fraction) ? Math.max(0, Math.min(1, fraction)) : 0.5;
+  return Math.round(left + span * f);
+}
+
+/** The reverse: the share a screen position lands on, kept inside the area. */
+function slotFraction(area, width, x) {
+  const left = (area && area.x) || 0;
+  const span = Math.max(0, ((area && area.width) || 0) - width);
+  if (span <= 0) return 0.5; // nowhere to go: the panel fills the width
+  const clamped = Math.max(left, Math.min(left + span, x));
+  return (clamped - left) / span;
+}
+
+module.exports = { panelSize, slotX, slotFraction, MAX_W, MIN_W, MAX_SHADE, MIN_SHADE };

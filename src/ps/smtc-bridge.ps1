@@ -7,6 +7,13 @@
 #  Runs under Windows PowerShell 5.1, which still carries the WinRT projection.
 # ============================================================================
 
+param(
+    # The widget's own media session, so it can be told apart from everyone
+    # else's. Passed in rather than assumed: a build from source and an
+    # installed one do not have to answer to the same name.
+    [string]$OwnAppId = ''
+)
+
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -269,6 +276,16 @@ function Get-Session {
     $playing = $sessions | Where-Object { $_.GetPlaybackInfo().PlaybackStatus -eq 'Playing' } | Select-Object -First 1
     if ($playing) { return $playing }
 
+    # Nothing is sounding anywhere. If the widget has a player of its own on the
+    # go, that is the one the buttons belong to: it is open because the user
+    # asked for it, and it is the only one whose next track we can choose. With
+    # Yandex Music also installed and paused, play used to reach for that
+    # instead and the track picked in the panel never started.
+    if ($OwnAppId) {
+        $own = $sessions | Where-Object { $_.SourceAppUserModelId -eq $OwnAppId } | Select-Object -First 1
+        if ($own) { return $own }
+    }
+
     $ya = $sessions | Where-Object { $_.SourceAppUserModelId -match 'yandex' } | Select-Object -First 1
     if ($ya) { return $ya }
 
@@ -319,6 +336,8 @@ $audioPidFor    = ''
 $audioPidAt     = -999
 $audioPinSystem = $false
 $tick           = 0
+$panelOpen      = $true
+$lastStateAt    = -999
 
 while ($true) {
     # 1. drain pending commands
@@ -346,6 +365,15 @@ while ($true) {
                 $lastVol = ''
                 continue
             }
+            if ($msg.cmd -eq 'watch') {
+                # Nobody is looking at a rolled-up shade: the level behind it
+                # does not need reading twice a second, and the state line does
+                # not need repeating as often.
+                $panelOpen = ($msg.arg -eq 'open')
+                $lastSig = ''
+                $lastVol = ''
+                continue
+            }
             if ($msg.cmd -eq 'volscope') {
                 # 'system' pins the slider to the master endpoint until the
                 # player changes; anything else re-resolves the app session.
@@ -356,6 +384,7 @@ while ($true) {
                 continue
             }
             Invoke-MediaCommand (Get-Session) $msg.cmd $msg.arg
+            $lastSig = '' # say what came of it without waiting for a heartbeat
         }
         catch {
             Emit @{ type = 'error'; where = 'cmd'; message = $_.Exception.Message }
@@ -385,11 +414,25 @@ while ($true) {
             $pos = 0.0
             $dur = 0.0
             if ($tl) {
-                $pos = [math]::Round(($tl.Position - $tl.StartTime).TotalSeconds, 1)
-                $dur = [math]::Round(($tl.EndTime - $tl.StartTime).TotalSeconds, 1)
+                $pos = ($tl.Position - $tl.StartTime).TotalSeconds
+                $dur = ($tl.EndTime - $tl.StartTime).TotalSeconds
+
+                # Position is a reading taken at LastUpdatedTime, not a running
+                # clock. Yandex Music writes it once when a track starts and
+                # never again, so a track two minutes in still reports four
+                # tenths of a second - and that is what the progress bar was
+                # drawn from. Adding the time since the reading gives where the
+                # track really is.
+                if ($info.PlaybackStatus -eq 'Playing' -and $tl.LastUpdatedTime.Year -gt 2000) {
+                    $age = ([DateTimeOffset]::UtcNow - $tl.LastUpdatedTime).TotalSeconds
+                    if ($age -gt 0 -and $age -lt 86400) { $pos += $age }
+                }
             }
             if ($dur -lt 0) { $dur = 0 }
             if ($pos -lt 0) { $pos = 0 }
+            if ($dur -gt 0 -and $pos -gt $dur) { $pos = $dur }
+            $pos = [math]::Round($pos, 1)
+            $dur = [math]::Round($dur, 1)
 
             $ctl = $info.Controls
             $state = @{
@@ -416,9 +459,25 @@ while ($true) {
                 }
             }
 
-            Emit $state
+            # The same line used to go out twice a second whether anything had
+            # changed or not, and every one of them was parsed, handed across to
+            # the panel and turned into work there. The panel runs its own clock
+            # between reports, so only a real change needs saying out loud — and
+            # a heartbeat, which is what keeps that clock honest.
+            $sig = @(
+                $state.app, $key, $state.status, $dur,
+                $state.shuffle, $state.repeat,
+                $ctl.IsNextEnabled, $ctl.IsPreviousEnabled, $ctl.IsPlayEnabled,
+                $ctl.IsPauseEnabled, $ctl.IsPlaybackPositionEnabled,
+                $ctl.IsShuffleEnabled, $ctl.IsRepeatEnabled
+            ) -join '|'
+            $beat = if ($panelOpen) { 10 } else { 20 }
+            if ($sig -ne $lastSig -or ($tick - $lastStateAt) -ge $beat) {
+                Emit $state
+                $lastStateAt = $tick
+            }
             $currentApp = $state.app
-            $lastSig = ($key + '|' + $state.status)
+            $lastSig = $sig
 
             if ($key -ne $artSent -and $key -ne '|') {
                 $artSent = $key
@@ -435,7 +494,9 @@ while ($true) {
     }
 
     # 3. volume - the player's own session when we can find it, else the system
-    if ($AudioOk) {
+    # Behind a closed shade there is no slider to keep in step, so the COM calls
+    # that read the level drop to once every four seconds.
+    if ($AudioOk -and ($panelOpen -or ($tick % 8) -eq 0)) {
         try {
             # Re-resolve when the player changes, or every 20s while unresolved.
             if (-not $audioPinSystem -and
@@ -474,7 +535,7 @@ while ($true) {
         }
         catch { $AudioOk = $false }
     }
-    elseif ($lastVol -ne 'off') {
+    elseif (-not $AudioOk -and $lastVol -ne 'off') {
         $lastVol = 'off'
         Emit @{ type = 'vol'; available = $false }
     }

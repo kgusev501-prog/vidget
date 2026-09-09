@@ -111,6 +111,22 @@ body.dragging #handle {
   pointer-events: none;
 }
 
+/* Being moved sideways, not pulled down: the strip has to stay visible and
+   under the hand, and look like it is being carried. */
+body.moving #handle {
+  opacity: 1;
+  pointer-events: auto;
+  cursor: grabbing;
+}
+
+body.moving #handle .pill {
+  width: 236px;
+  height: 27px;
+  opacity: 1;
+  background: rgba(61, 139, 255, 0.62);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
 /* ── the shade ───────────────────────────────────────────── */
 #panel {
   position: absolute;

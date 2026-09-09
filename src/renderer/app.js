@@ -38,6 +38,13 @@ const panel = $('#panel');
 // ============================================================
 let isOpen = false;
 let drag = null;
+// A message that arrived while the shade was rolled up, waiting for a panel to
+// sit under.
+let heldToast = null;
+
+// How far the hand has to travel before a drag off the handle commits to being
+// a pull down or a slide sideways.
+const AXIS_THRESHOLD = 6;
 
 // The main process owns hover detection: it watches the real cursor and hands
 // the mouse to this window only while the pointer is over the handle.
@@ -51,12 +58,15 @@ api.ui.onHover((on) => {
 const setPull = (px) => panel.style.setProperty('--pull', `${px}px`);
 
 function beginDrag(e, from) {
-  drag = { startY: e.screenY, moved: 0, from };
-  body.classList.add('dragging');
+  // A drag off the grip can only be a pull; one off the handle is undecided —
+  // it may turn out to be a sideways move of the whole strip.
+  drag = { startX: e.screenX, startY: e.screenY, moved: 0, from, mode: from === 'grip' ? 'pull' : null };
   body.classList.remove('animating');
-  if (from === 'handle') {
-    // Grow the window first, so the shade has somewhere to slide into.
-    api.ui.prepare();
+  if (from === 'grip') body.classList.add('dragging');
+  else {
+    // Hold the mouse without committing to anything: the cursor watch would
+    // otherwise hand it straight back the moment the pointer left the handle.
+    api.ui.grab();
     setPull(0);
   }
   e.currentTarget.setPointerCapture?.(e.pointerId);
@@ -76,19 +86,51 @@ $('#grip').addEventListener('pointerdown', (e) => {
 
 document.addEventListener('pointermove', (e) => {
   if (!drag) return;
-  const delta = e.screenY - drag.startY;
-  drag.moved = Math.max(drag.moved, Math.abs(delta));
+  const dy = e.screenY - drag.startY;
+  const dx = e.screenX - drag.startX;
+
+  // Whichever way the hand went first is what the gesture means: down pulls the
+  // shade out, sideways slides the strip along the top edge and, past the end
+  // of one monitor, onto the next.
+  if (!drag.mode) {
+    if (Math.abs(dx) > AXIS_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
+      drag.mode = 'move';
+      body.classList.add('moving');
+      api.ui.moveStart(e.screenX);
+    } else if (Math.abs(dy) > AXIS_THRESHOLD) {
+      drag.mode = 'pull';
+      body.classList.add('dragging');
+      api.ui.prepare(); // take the mouse and let the shade slide
+    } else {
+      return; // too small to mean anything yet
+    }
+  }
+
+  if (drag.mode === 'move') {
+    api.ui.move(e.screenX);
+    return;
+  }
+
+  drag.moved = Math.max(drag.moved, Math.abs(dy));
   const base = drag.from === 'handle' ? 0 : PANEL_H;
   if (drag.from === 'grip') body.classList.remove('open');
-  setPull(Math.max(0, Math.min(PANEL_H, base + delta)));
+  setPull(Math.max(0, Math.min(PANEL_H, base + dy)));
 });
 
 document.addEventListener('pointerup', (e) => {
   if (!drag) return;
-  const { from, moved } = drag;
+  const { from, moved, mode } = drag;
   const delta = e.screenY - drag.startY;
   drag = null;
-  body.classList.remove('dragging');
+  body.classList.remove('dragging', 'moving');
+
+  if (mode === 'move') {
+    // The strip was moved, not opened: hand the mouse back to the desktop.
+    api.ui.moveEnd();
+    api.ui.release();
+    return;
+  }
+
   body.classList.add('animating');
 
   if (from === 'handle') {
@@ -109,6 +151,13 @@ api.ui.onOpen(() => {
   body.classList.add('animating', 'open');
   setPull(0);
   refreshAll();
+  // Anything that happened behind a closed shade gets said now, once there is
+  // a panel for it to sit under.
+  if (heldToast) {
+    const held = heldToast;
+    heldToast = null;
+    setTimeout(() => toast(held), 500);
+  }
 });
 
 api.ui.onClose(() => {
@@ -349,6 +398,12 @@ function applyState(s) {
   const ours = s.app === 'com.vidget.overlay' || s.app === 'electron.exe';
   appBox.textContent = ours && wave.on ? 'Моя волна' : APP_NAMES[s.app] || s.app || '';
 
+  // It started after all; nothing to warn about.
+  if (playWatch && ours && s.status === 'Playing') {
+    clearTimeout(playWatch);
+    playWatch = null;
+  }
+
   // Without a Yandex sign-in the embedded player stops a track early; say so
   // once instead of leaving the wave to look broken.
   if (ours && wave.on && s.status !== 'Playing' && !yaStatus.web && !wave.warned) {
@@ -414,14 +469,28 @@ setInterval(() => {
     if (ours && mediaState.status === 'Playing') {
       wave.playedMs += 250;
       wave.silentMs = 0;
+      wave.userPaused = false; // sounding again, however that was asked for
       const total = wave.current && wave.current.durationMs;
       if (total && wave.playedMs >= total - 400) advanceWave();
     } else if (wave.playedMs > 4000 && !wave.userPaused && (!mediaState.active || ours)) {
       // Our player went quiet by itself: the track is over, or the embed cut it
       // short. Either way the wave should move on — but not while another app
       // has taken over the sound, and not when the pause was asked for.
-      wave.silentMs += 250;
-      if (wave.silentMs >= 2500) advanceWave();
+      //
+      // A pause asked for anywhere but our own button — a media key, the volume
+      // overlay, unplugged headphones — used to look exactly like a track
+      // ending, and skipped it. Where a whole track can really play, which is
+      // what the sign-in buys, a pause is taken at its word. Without the
+      // sign-in the embed stops itself part way, and that has to move on.
+      const total = (wave.current && wave.current.durationMs) || 0;
+      const nearEnd = !total || wave.playedMs >= total - 5000;
+      if (ours && mediaState.status === 'Paused' && yaStatus.web && !nearEnd) {
+        wave.userPaused = true;
+        wave.silentMs = 0;
+      } else {
+        wave.silentMs += 250;
+        if (wave.silentMs >= 2500) advanceWave();
+      }
     }
   }
 
@@ -587,7 +656,8 @@ function paintVolume() {
   volBox.classList.toggle('off', !volState.available);
 }
 
-api.media.onVol((v) => {
+function applyVol(v) {
+  if (!v) return;
   volState = {
     available: v.available !== false,
     value: v.value ?? 0,
@@ -599,7 +669,9 @@ api.media.onVol((v) => {
   volBox.title = where;
   $('#vol-icon').title = `${where} — выключить звук`;
   if (!volDrag) paintVolume();
-});
+}
+
+api.media.onVol(applyVol);
 
 volTrack.addEventListener('pointerdown', (e) => {
   if (!volState.available) return;
@@ -828,6 +900,9 @@ const ymEngine = $('#ym-engine');
 // track towards its end and skip it.
 const wave = { on: false, current: null, history: [], playedMs: 0, silentMs: 0, userPaused: false, busy: false, warned: false };
 
+// Pending check that the track we asked for actually made a sound.
+let playWatch = null;
+
 const playingHere = () =>
   mediaState.active && (mediaState.app === 'com.vidget.overlay' || mediaState.app === 'electron.exe');
 
@@ -842,9 +917,31 @@ async function advanceWave() {
 
   if (!res || !res.ok) {
     wave.on = false;
+    ymEngine.textContent = ''; // a finished embed keeps a media session alive
     return toast((res && res.error) || 'Волна остановилась');
   }
   playTrack(res.track);
+}
+
+/**
+ * Watches whether the track we asked for actually started.
+ *
+ * The embed is a page on someone else's origin: it cannot report back, and a
+ * refusal to play looks exactly like a slow start. The one honest signal is a
+ * media session appearing under our own name — so wait for one rather than
+ * leave the panel saying "Включаем…" over silence.
+ */
+function watchPlayback() {
+  if (playWatch) clearTimeout(playWatch);
+  playWatch = setTimeout(() => {
+    playWatch = null;
+    if (playingHere() && mediaState.status === 'Playing') return;
+    toast(
+      yaStatus.web
+        ? 'Трек не запустился — попробуйте ещё раз'
+        : 'Трек не запустился. Войдите в Яндекс Музыку: «⋯» → «Яндекс Музыка»'
+    );
+  }, 9000);
 }
 
 async function startWave() {
@@ -898,7 +995,10 @@ function playTrack(track) {
 
   if (!yaStatus.web) toast('Войдите в Яндекс Музыку, чтобы трек играл целиком');
 
-  api.media.cmd('pause'); // do not let the desktop player talk over it
+  // Quiet whatever else is sounding — but never our own player. Rolling from
+  // one wave track to the next, this used to pause the very embed that was
+  // about to start.
+  if (!playingHere()) api.media.cmd('pause');
   ymEngine.textContent = '';
 
   const frame = document.createElement('iframe');
@@ -906,6 +1006,7 @@ function playTrack(track) {
   frame.src = `https://music.yandex.ru/iframe/track/${track.id}/${track.albumId}?autoplay=1`;
   ymEngine.append(frame);
   toast('Включаем…');
+  watchPlayback();
 }
 
 function clearTrackSearch() {
@@ -1621,6 +1722,11 @@ api.app.onUpdate((st) => {
   if (st && st.downloaded) toast('Обновление готово, встанет при выходе');
 });
 
+$('#set-center').addEventListener('click', () => {
+  api.ui.center();
+  toast('Панель вернулась на середину');
+});
+
 $('#set-account-btn').addEventListener('click', () => {
   closeSettings();
   openYa();
@@ -1643,6 +1749,7 @@ async function maybeWelcome() {
   const hotkey = s.hotkey || 'Control+Alt+Space';
   $('#wel-hotkey').textContent =
     `Открыть панель можно и с клавиатуры: ${HOTKEY_NAMES[hotkey] || hotkey}. ` +
+    'Полоску можно потянуть вбок — панель переедет туда, где удобнее, хоть на соседний монитор. ' +
     'Значок в трее держит те же настройки и выход.';
   welcomePane.hidden = false;
   api.ui.expand();
@@ -1713,6 +1820,15 @@ document.addEventListener('click', (e) => {
 
 let toastTimer = null;
 function toast(text) {
+  if (!text) return;
+  // The window stays on screen with the shade rolled up — it is a transparent
+  // sheet across the top of the desktop. A bubble drawn now would hang there
+  // on its own with nothing around it, which is what the wave did every time
+  // it changed track behind a closed shade. Hold it until there is a panel.
+  if (!isOpen) {
+    heldToast = text;
+    return;
+  }
   const t = $('#toast');
   t.textContent = text;
   t.classList.add('show');
@@ -1764,10 +1880,9 @@ async function refreshAll() {
   if (snap) {
     applyState(snap.state);
     setArt(snap.art && snap.art.data);
-    if (snap.vol) {
-      volState = { available: snap.vol.available !== false, value: snap.vol.value ?? 0, muted: !!snap.vol.muted };
-      paintVolume();
-    }
+    // Through the same door as a live report, so the slider and its tooltip do
+    // not quietly forget which player they belong to.
+    applyVol(snap.vol);
   }
   loadClips();
   loadNotes();

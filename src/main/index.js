@@ -53,7 +53,7 @@ const { YandexMusic } = require('./yandex');
 const yandexLogin = require('./yandex-login');
 const { Player } = require('./player');
 const { startServer } = require('./server');
-const { panelSize: measurePanel } = require('../shared/panel-size');
+const { panelSize: measurePanel, slotX, slotFraction } = require('../shared/panel-size');
 const updater = require('./updater');
 const youtube = require('./youtube');
 
@@ -63,6 +63,11 @@ const youtube = require('./youtube');
 // stays click-through, except over the handle or while the shade is open.
 const HANDLE_W = 260;
 const HANDLE_H = 30;
+
+// One identity for the app everywhere: the taskbar grouping, the autostart
+// entry, and the media session the widget publishes when it plays something
+// itself — which is how the bridge tells our own player from everyone else's.
+const APP_ID = 'com.vidget.overlay';
 
 const DEV = process.argv.includes('--dev');
 
@@ -110,20 +115,96 @@ function pollCursor() {
 }
 
 // --- window -----------------------------------------------------------------
+// The widget is not nailed to the middle of the main monitor. The strip can be
+// dragged along the top edge and across onto another display, and where it was
+// left is remembered between runs.
+function placement() {
+  const saved = (settings && settings.get().placement) || {};
+  const x = Number(saved.x);
+  return {
+    display: saved.display == null ? null : Number(saved.display),
+    x: Number.isFinite(x) ? Math.max(0, Math.min(1, x)) : 0.5,
+  };
+}
+
+/** The display the widget lives on — the remembered one while it still exists. */
+function homeDisplay() {
+  const want = placement().display;
+  if (want != null) {
+    const hit = screen.getAllDisplays().find((d) => d.id === want);
+    if (hit) return hit;
+  }
+  return screen.getPrimaryDisplay();
+}
+
 /** Panel size for the display the widget lives on. */
 function panelSize() {
-  return measurePanel(screen.getPrimaryDisplay().workArea);
+  return measurePanel(homeDisplay().workArea);
 }
 
 function targetBounds() {
-  const area = screen.getPrimaryDisplay().workArea;
-  const size = panelSize();
+  const area = homeDisplay().workArea;
+  const size = measurePanel(area);
   return {
-    x: Math.round(area.x + (area.width - size.width) / 2),
+    x: slotX(area, size.width, placement().x),
     y: area.y,
     width: size.width,
     height: size.height,
   };
+}
+
+// --- moving the strip -------------------------------------------------------
+// The window is deliberately not `movable`: Windows would let the user drag it
+// anywhere, including off the top edge where the shade could not open. Instead
+// the handle drag is turned into a slide along the top edge of whichever
+// monitor the strip is over.
+let moveGrab = null;
+
+function beginMove(screenX) {
+  if (!win || win.isDestroyed()) return;
+  moveGrab = screenX - win.getBounds().x;
+}
+
+function moveTo(screenX) {
+  if (moveGrab == null || !win || win.isDestroyed()) return;
+  const wanted = screenX - moveGrab;
+  const b = win.getBounds();
+
+  // Whichever monitor the middle of the strip is over is the one it lands on.
+  const display = screen.getDisplayNearestPoint({
+    x: Math.round(wanted + b.width / 2),
+    y: b.y + Math.round(HANDLE_H / 2),
+  });
+  const area = display.workArea;
+  const size = measurePanel(area);
+  const share = slotFraction(area, size.width, wanted);
+  const x = slotX(area, size.width, share);
+
+  // Resizing a transparent window leaves the newly exposed area unpainted, so
+  // the size is only ever touched when the strip actually changes monitor.
+  if (size.width !== b.width || size.height !== b.height) {
+    win.setBounds({ x, y: area.y, width: size.width, height: size.height });
+    sendShadeSize();
+  } else {
+    win.setPosition(x, area.y);
+  }
+
+  const s = settings.get();
+  s.placement = { display: display.id, x: share };
+  settings.set(s);
+}
+
+/** Back to where it started: the middle of the main monitor. */
+function centerPanel() {
+  const s = settings.get();
+  s.placement = { display: screen.getPrimaryDisplay().id, x: 0.5 };
+  settings.set(s);
+  reposition();
+}
+
+/** True while a window of ours other than the panel is on screen. */
+function hasOwnChildWindow() {
+  return BrowserWindow.getAllWindows().some((w) => w !== win && !w.isDestroyed() && w.isVisible());
 }
 
 /** The strip the closed shade actually responds to, in screen coordinates. */
@@ -178,7 +259,9 @@ function createWindow() {
   });
 
   win.on('blur', () => {
-    if (expanded) collapse();
+    // The sign-in window is ours and takes the focus on purpose; rolling the
+    // shade up under it would hide the very screen that reports the result.
+    if (expanded && !hasOwnChildWindow()) collapse();
   });
 
   // Nothing inside the panel should ever navigate away or open a second window.
@@ -216,6 +299,22 @@ function prepare() {
   win.setAlwaysOnTop(true, 'screen-saver');
   win.show();
   win.focus();
+  // While nobody is looking at the panel the bridge has less to report.
+  if (media) media.send('watch', 'open');
+}
+
+/**
+ * Holds the mouse without opening the shade.
+ *
+ * A drag that starts on the handle might turn out to be a sideways move rather
+ * than a pull, and the cursor watch would otherwise hand the mouse back to the
+ * desktop the moment the pointer left the handle mid-gesture.
+ */
+function grab() {
+  stopHoverWatch();
+  if (!win || win.isDestroyed()) return;
+  hovering = true;
+  win.setIgnoreMouseEvents(false);
 }
 
 function expand() {
@@ -241,6 +340,7 @@ function finishCollapse() {
   hovering = false;
   win.webContents.send('ui:hover', false);
   startHoverWatch();
+  if (media) media.send('watch', 'closed');
 }
 
 function toggle() {
@@ -299,6 +399,7 @@ function refreshTrayMenu() {
           settings.set(s);
         },
       },
+      { label: 'Панель по центру экрана', click: () => centerPanel() },
       { label: 'Папка с данными', click: () => shell.openPath(app.getPath('userData')) },
       { type: 'separator' },
       { label: 'Выход', click: () => quit() },
@@ -336,7 +437,12 @@ function loadToken() {
       return null;
     }
   }
-  return s.yandexToken || null;
+  // An older build wrote the token exactly as it came. Now that it has been
+  // read, put it back the way it should have been kept — the settings file is
+  // plain text and sits in a folder anything running as this user can open.
+  const plain = s.yandexToken || null;
+  if (plain && safeStorage.isEncryptionAvailable()) saveToken(plain);
+  return plain;
 }
 
 function saveToken(token) {
@@ -368,7 +474,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function init() {
-  app.setAppUserModelId('com.vidget.overlay');
+  app.setAppUserModelId(APP_ID);
 
   const dir = app.getPath('userData');
   const imageDir = path.join(dir, 'images');
@@ -396,9 +502,9 @@ async function init() {
   const noteStore = new Store(dir, 'notes', { notes: [] });
   stores = [settings, clipStore, noteStore];
 
-  media = new MediaBridge();
+  media = new MediaBridge(APP_ID);
   clip = new ClipboardWatcher(clipStore, imageDir, () => settings.get());
-  clip.setOrigin(web ? web.origin : null);
+  clip.setOrigin(web ? web.origin : null, web ? web.clipPrefix : null);
   notes = new Notes(noteStore);
   yandex = new YandexMusic();
   player = new Player();
@@ -497,6 +603,16 @@ function registerIpc() {
   ipcMain.on('ui:expand', () => expand());
   ipcMain.on('ui:request-close', () => collapse());
   ipcMain.on('ui:collapsed', () => finishCollapse());
+  ipcMain.on('ui:grab', () => grab());
+  ipcMain.on('ui:release', () => {
+    if (!expanded) finishCollapse();
+  });
+  ipcMain.on('ui:move-start', (_e, screenX) => beginMove(screenX));
+  ipcMain.on('ui:move', (_e, screenX) => moveTo(screenX));
+  ipcMain.on('ui:move-end', () => {
+    moveGrab = null;
+  });
+  ipcMain.on('ui:center', () => centerPanel());
 
   ipcMain.handle('media:snapshot', () => media.snapshot());
   ipcMain.on('media:cmd', (_e, { cmd, arg }) => media.send(cmd, arg));
