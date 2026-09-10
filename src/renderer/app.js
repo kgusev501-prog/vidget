@@ -539,6 +539,11 @@ $('#prev').addEventListener('click', () => {
 });
 $('#shuffle').addEventListener('click', () => api.media.cmd('shuffle', !mediaState.shuffle));
 $('#repeat').addEventListener('click', () => {
+  if (ownActive()) {
+    own.repeat = own.repeat === 'Track' ? 'None' : 'Track';
+    pushOwnState();
+    return;
+  }
   const order = { None: 'List', List: 'Track', Track: 'None' };
   api.media.cmd('repeat', order[mediaState.repeat] || 'List');
 });
@@ -877,7 +882,9 @@ const wave = { on: false, current: null, history: [], busy: false };
 
 // The track loaded into our own player, or null when the panel is only acting
 // as a remote for somebody else's.
-const own = { track: null, failures: 0 };
+// repeat is 'None' or 'Track'. A wave has no list to loop, so the middle rung
+// of the usual three-way cycle would be a button that promises nothing.
+const own = { track: null, failures: 0, repeat: 'None' };
 const ownActive = () => !!own.track;
 
 // The last thing SMTC said, so the panel can fall back to it once our own
@@ -999,7 +1006,8 @@ function pushOwnState() {
     position: audio.currentTime || 0,
     duration: audio.duration || (t.durationMs || 0) / 1000,
     // Ours to do, all of it: the queue is right here.
-    can: { next: true, prev: true, seek: true, shuffle: false, repeat: false },
+    can: { next: true, prev: true, seek: true, shuffle: false, repeat: true },
+    repeat: own.repeat,
     stampedAt: Date.now(),
   });
 }
@@ -1007,6 +1015,7 @@ function pushOwnState() {
 /** Hands the panel back to whatever else Windows has, if anything. */
 function releaseOwn() {
   own.track = null;
+  own.repeat = 'None';
   words.lines = null;
   words.shown = -2;
   api.ya.setLines(null);
@@ -1058,7 +1067,15 @@ audio.addEventListener('loadedmetadata', pushOwnState);
 audio.addEventListener('timeupdate', pushOwnState);
 
 // The honest end of a track — no guessing from silence any more.
-audio.addEventListener('ended', () => advanceWave());
+audio.addEventListener('ended', () => {
+  // Round again, for learning the words: the wave can wait.
+  if (ownActive() && own.repeat === 'Track') {
+    audio.currentTime = 0;
+    audio.play().catch(() => advanceWave());
+    return;
+  }
+  advanceWave();
+});
 
 audio.addEventListener('error', () => {
   if (!ownActive()) return;
