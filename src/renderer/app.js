@@ -897,10 +897,7 @@ let smtcState = { active: false };
 // sheet — they glance.
 const lyricsBox = $('#lyrics');
 const lyricsDock = $('#lyrics-dock');
-const lyricNowRow = $('#lyric-now');
-const lyricNextRow = $('#lyric-next');
-const lyricNow = lyricNowRow.firstElementChild;
-const lyricNext = lyricNextRow.firstElementChild;
+const lyricReel = $('#lyric-reel');
 const lyricsBtn = $('#lyrics-btn');
 
 const words = { on: false, trackId: null, lines: null, shown: -2 };
@@ -918,6 +915,7 @@ async function loadLyrics(track) {
   words.lines = null;
   words.shown = -2;
   api.ya.setLines(null);
+  buildReel(null);
   paintLyrics();
 
   if (!words.on || !track || !track.lyrics) return;
@@ -934,18 +932,32 @@ async function loadLyrics(track) {
     words.lines = res.lines;
     api.ya.setLines(res.lines);
   }
+  buildReel(words.lines);
   paintLyrics();
 }
 
 /**
- * Puts the two lines where they belong for the state the shade is in.
+ * Puts the reel where it belongs for the state the shade is in.
  *
- * The same two nodes move rather than a second copy being kept in step: one
- * text, one place it is written, wherever that place happens to be.
+ * The same node moves rather than a second copy being kept in step: one text,
+ * one place it is written, wherever that place happens to be.
  */
 function dockLyrics() {
   const home = isOpen ? lyricsBox : lyricsDock;
-  if (lyricNowRow.parentElement !== home) home.append(lyricNowRow, lyricNextRow);
+  if (lyricReel.parentElement !== home) home.append(lyricReel);
+}
+
+/** Builds the reel: every line of the song, stacked, ready to slide. */
+function buildReel(lines) {
+  lyricReel.textContent = '';
+  if (!lines) return;
+  for (const line of lines) lyricReel.append(el('div', 'lyric', line.text));
+  // A fresh reel starts at the top with no animation, or it would fly in from
+  // wherever the last song happened to be.
+  lyricReel.style.transition = 'none';
+  lyricReel.style.transform = 'translateY(0)';
+  void lyricReel.offsetHeight; // let the browser take that before we re-enable
+  lyricReel.style.transition = '';
 }
 
 function paintLyrics() {
@@ -956,10 +968,6 @@ function paintLyrics() {
   lyricsDock.hidden = !showing || isOpen;
   body.classList.toggle('has-lyrics', showing);
   if (!showing) {
-    // Leaving the old line in place would flash it for a frame the next time
-    // words appear, before the first tick has worked out where we are.
-    lyricNow.textContent = '';
-    lyricNext.textContent = '';
     words.shown = -2;
     return;
   }
@@ -969,10 +977,18 @@ function paintLyrics() {
   const pos = ownActive() ? audio.currentTime : currentPos();
   const i = api.ya.lineAt(pos);
   if (i === words.shown) return;
+
+  const rows = lyricReel.children;
+  const was = rows[words.shown];
+  if (was) was.classList.remove('is-now');
   words.shown = i;
 
-  lyricNow.textContent = i < 0 ? '' : words.lines[i].text;
-  lyricNext.textContent = (words.lines[i + 1] && words.lines[i + 1].text) || '';
+  // -1 is the intro: the reel drops by one so the top slot is empty and the
+  // first line waits below, which is exactly what a singer wants to see.
+  lyricReel.style.transform = `translateY(calc(var(--lyric-h) * ${-i}))`;
+
+  for (let n = 0; n < rows.length; n++) rows[n].classList.toggle('is-past', n < i);
+  if (rows[i]) rows[i].classList.add('is-now');
 }
 
 lyricsBtn.addEventListener('click', () => {
@@ -983,6 +999,7 @@ lyricsBtn.addEventListener('click', () => {
   else {
     words.lines = null;
     api.ya.setLines(null);
+    buildReel(null);
     paintLyrics();
   }
 });
@@ -1019,6 +1036,7 @@ function releaseOwn() {
   words.lines = null;
   words.shown = -2;
   api.ya.setLines(null);
+  buildReel(null);
   paintLyricsButton();
   paintLyrics();
   audio.removeAttribute('src');

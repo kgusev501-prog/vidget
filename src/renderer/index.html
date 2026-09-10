@@ -59,7 +59,13 @@
       <!-- Where the two lines live while the shade is shut: right under the
            strip, on a plate of their own. The window is click-through
            everywhere but the strip itself, so the words never take the mouse. -->
-      <div id="lyrics-dock" hidden></div>
+      <div id="lyrics-dock" class="lyric-window" hidden></div>
+
+      <!-- Every line of the song, stacked. Only two are ever in view; moving
+           between them is a slide of the whole reel, so the eye follows the
+           words up instead of watching them blink in place. This one node
+           moves between the strip and the panel. -->
+      <div id="lyric-reel"></div>
 
       <div id="backdrop"></div>
 
@@ -128,10 +134,7 @@
 
             <!-- Две строки: та, что звучит, и та, что будет следующей. При
                  свёрнутой панели этот же блок уезжает под полоску. -->
-            <div id="lyrics" hidden>
-              <div id="lyric-now" class="lyric"><span></span></div>
-              <div id="lyric-next" class="lyric ahead"><span></span></div>
-            </div>
+            <div id="lyrics" class="lyric-window" hidden></div>
 
             <div id="np-app"></div>
           </div>
