@@ -28,6 +28,7 @@
       <symbol id="i-heart" viewBox="0 0 24 24"><path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z"/></symbol>
       <symbol id="i-heart-fill" viewBox="0 0 24 24"><path d="m12 21.35-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></symbol>
       <symbol id="i-thumbdown" viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></symbol>
+      <symbol id="i-lyrics" viewBox="0 0 24 24"><path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM4 12h4v2H4v-2zm10 6H4v-2h10v2zm6 0h-4v-2h4v2zm0-4H10v-2h10v2z"/></symbol>
       <symbol id="i-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></symbol>
       <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 7V3.5L18.5 9H13z"/></symbol>
       <symbol id="i-zip" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 7V3.5L18.5 9H13zM9 5h2v2H9V5zm2 2h2v2h-2V7zM9 9h2v2H9V9zm2 2h2v2h-2v-2zm-1 3h2v3h-2v-3z"/></symbol>
@@ -99,6 +100,9 @@
               <div id="reactions">
                 <button id="like" class="ctl small" title="Нравится"><svg class="i"><use id="like-use" href="#i-heart"/></svg></button>
                 <button id="dislike" class="ctl small" title="Не нравится"><svg class="i"><use href="#i-thumbdown"/></svg></button>
+                <!-- Появляется только у треков, для которых Яндекс знает текст
+                     со временем: подпевать по простыне без таймкодов нельзя. -->
+                <button id="lyrics-btn" class="ctl small" title="Текст песни" hidden><svg class="i"><use href="#i-lyrics"/></svg></button>
               </div>
 
               <div id="controls">
@@ -116,6 +120,14 @@
                 <div id="vol-track"><div id="vol-fill"></div><div id="vol-knob"></div></div>
               </div>
             </div>
+
+            <!-- Две строки: та, что звучит, и та, что будет следующей. При
+                 свёрнутой панели этот же блок уезжает под полоску. -->
+            <div id="lyrics" hidden>
+              <div id="lyric-now" class="lyric"><span></span></div>
+              <div id="lyric-next" class="lyric ahead"><span></span></div>
+            </div>
+
             <div id="np-app"></div>
           </div>
 

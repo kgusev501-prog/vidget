@@ -540,6 +540,7 @@ async function init() {
   settings = new Store(dir, 'settings', {
     autostart: true,
     launchPlayer: false,
+    lyrics: false,
     keepImages: true,
     clipLimit: 300,
     // Pictures are kept at full quality, so the history is bounded by disk

@@ -1413,6 +1413,46 @@ body.no-media #repeat {
   display: none;
 }
 
+/* ── текст песни ──────────────────────────────────────────── */
+#lyrics {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+  text-align: center;
+  overflow: hidden;
+}
+
+.lyric {
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.35;
+  transition: color 0.25s ease, opacity 0.25s ease;
+}
+
+/* The line being sung is the one to read; the next is a hint of what comes,
+   not something to look at yet. */
+#lyric-now {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+#lyric-next {
+  font-size: 12.5px;
+  color: var(--fg-faint);
+}
+
+/* An empty line still holds its height, so the pair does not jump about
+   between verses. */
+.lyric:empty::after,
+.lyric span:empty::after {
+  content: 'b';
+}
+
 #ya-body .note {
   margin-top: 10px;
   font-size: 11.5px;

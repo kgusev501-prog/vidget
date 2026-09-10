@@ -2,6 +2,13 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+const { lineAt } = require('../shared/lrc');
+
+// The panel asks which line is being sung several times a second. Handing the
+// whole list across the bridge each time would copy it each time, so the lines
+// stay here and only a number crosses.
+let timedLines = [];
+
 const on = (channel) => (handler) => {
   const wrapped = (_event, payload) => handler(payload);
   ipcRenderer.on(channel, wrapped);
@@ -71,6 +78,11 @@ contextBridge.exposeInMainWorld('vidget', {
     play: (id, albumId) => ipcRenderer.invoke('ya:play', { id, albumId }),
     stream: (id) => ipcRenderer.invoke('ya:stream', id),
     lyrics: (id) => ipcRenderer.invoke('ya:lyrics', id),
+    // Timed lines live on this side; the panel asks for an index by seconds.
+    setLines: (lines) => {
+      timedLines = Array.isArray(lines) ? lines : [];
+    },
+    lineAt: (seconds) => lineAt(timedLines, seconds),
     like: () => ipcRenderer.invoke('ya:like'),
     dislike: () => ipcRenderer.invoke('ya:dislike'),
     openAuth: () => ipcRenderer.send('ya:open-auth'),

@@ -456,6 +456,10 @@ function setSeek(pos, dur) {
 }
 
 setInterval(() => {
+  // The words are followed whether or not the panel is open — the whole point
+  // is singing along while working, with the shade shut.
+  paintLyrics();
+
   if (!isOpen || seekDrag || activeTab !== 'music') return;
   const dur = clock.duration;
   setSeek(Math.min(currentPos(), dur || Infinity), dur);
@@ -878,6 +882,78 @@ const ownActive = () => !!own.track;
 // player stops.
 let smtcState = { active: false };
 
+// --- the words ---------------------------------------------------------------
+// Two lines at a time: the one being sung and the one about to be. More than
+// that is a lyrics sheet, and somebody working with music on does not read a
+// sheet — they glance.
+const lyricsBox = $('#lyrics');
+const lyricNow = $('#lyric-now').firstElementChild;
+const lyricNext = $('#lyric-next').firstElementChild;
+const lyricsBtn = $('#lyrics-btn');
+
+const words = { on: false, trackId: null, lines: null, shown: -2 };
+
+/** Only tracks Yandex has timed words for can offer the button at all. */
+function paintLyricsButton() {
+  const offered = !!(own.track && own.track.lyrics);
+  lyricsBtn.hidden = !offered;
+  lyricsBtn.classList.toggle('on', words.on);
+  lyricsBtn.title = words.on ? 'Скрыть текст песни' : 'Показать текст песни';
+}
+
+/** Fetches the words for the track now playing, if they are wanted. */
+async function loadLyrics(track) {
+  words.lines = null;
+  words.shown = -2;
+  api.ya.setLines(null);
+  paintLyrics();
+
+  if (!words.on || !track || !track.lyrics) return;
+  words.trackId = track.id;
+
+  const res = await api.ya.lyrics(track.id);
+  if (words.trackId !== track.id) return; // moved on while we were asking
+  if (!res || !res.ok) {
+    // Nothing to sing along to is not worth a toast on every track; the button
+    // going quiet says it well enough.
+    words.lines = null;
+    api.ya.setLines(null);
+  } else {
+    words.lines = res.lines;
+    api.ya.setLines(res.lines);
+  }
+  paintLyrics();
+}
+
+function paintLyrics() {
+  const showing = words.on && words.lines && words.lines.length;
+  lyricsBox.hidden = !showing;
+  body.classList.toggle('has-lyrics', !!showing);
+  if (!showing) return;
+
+  // Our own player knows exactly where it is; the extrapolated clock is only
+  // for somebody else's playback, which has no words here anyway.
+  const pos = ownActive() ? audio.currentTime : currentPos();
+  const i = api.ya.lineAt(pos);
+  if (i === words.shown) return;
+  words.shown = i;
+
+  lyricNow.textContent = i < 0 ? '' : words.lines[i].text;
+  lyricNext.textContent = (words.lines[i + 1] && words.lines[i + 1].text) || '';
+}
+
+lyricsBtn.addEventListener('click', () => {
+  words.on = !words.on;
+  api.app.setSetting('lyrics', words.on);
+  paintLyricsButton();
+  if (words.on) loadLyrics(own.track);
+  else {
+    words.lines = null;
+    api.ya.setLines(null);
+    paintLyrics();
+  }
+});
+
 /**
  * Publishes our player in the same shape the SMTC bridge uses.
  *
@@ -905,6 +981,11 @@ function pushOwnState() {
 /** Hands the panel back to whatever else Windows has, if anything. */
 function releaseOwn() {
   own.track = null;
+  words.lines = null;
+  words.shown = -2;
+  api.ya.setLines(null);
+  paintLyricsButton();
+  paintLyrics();
   audio.removeAttribute('src');
   audio.load();
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none';
@@ -1034,6 +1115,8 @@ async function playTrack(track) {
 
   describeOwn(track);
   useCover(track.cover);
+  paintLyricsButton();
+  loadLyrics(track);
   pushOwnState();
 
   // Quiet whatever else is sounding. Our own player is not on that list — it
@@ -2706,6 +2789,8 @@ setTimeout(() => maybeWelcome().catch(() => {}), 1200);
   ytOrigin = await api.yt.origin();
   const s = await api.app.settings();
   lastTrack = s.lastTrack || null;
+  words.on = s.lyrics === true;
+  paintLyricsButton();
   applyTabOrder(s.tabOrder);
   selectTab(s.tab || 'music');
   paintVolume();
