@@ -1429,6 +1429,10 @@ body.no-media #repeat {
   height: calc(var(--lyric-h) * 2);
   overflow: hidden;
   flex: 0 0 auto;
+  /* A fixed width inside a wider column would sit against its left edge; the
+     words belong in the middle wherever they are shown. */
+  margin-inline: auto;
+  align-self: center;
 }
 
 /* Every line of the song, stacked. Moving on slides the whole reel, so the eye
@@ -1465,41 +1469,60 @@ body.no-media #repeat {
   opacity: 0.25;
 }
 
-/* Under the strip, while the shade is shut. Contrast is the whole job here:
-   these words land on top of whatever the desktop happens to be showing, so
-   they get their own dark plate rather than trusting the wallpaper. */
+/* With the words on, the strip stops being a little tab and becomes the plate
+   they are written on — pressed to the top edge of the screen, one thing
+   instead of two stacked ones. */
 #lyrics-dock {
-  position: absolute;
-  top: 30px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 25;
-  padding: 5px 0 7px;
-  height: calc(var(--lyric-h) * 2 + 12px);
-  border-radius: 0 0 16px 16px;
-  background: rgba(14, 16, 22, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-top: none;
-  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(14px);
-  pointer-events: none;
+  margin-top: 4px;
   animation: lyrics-rise 0.26s cubic-bezier(0.2, 0.9, 0.25, 1);
 }
 
-/* Rising into place, the way the shade itself moves. */
 @keyframes lyrics-rise {
   from {
     opacity: 0;
-    transform: translate(-50%, -10px);
+    transform: translateY(-8px);
   }
   to {
     opacity: 1;
-    transform: translate(-50%, 0);
+    transform: translateY(0);
   }
 }
 
-/* On the plate the words carry themselves: brighter, with a shadow so a pale
-   wallpaper behind the blur cannot swallow them. */
+body.has-lyrics:not(.open) #handle {
+  width: calc(var(--lyric-w) + 34px);
+  height: auto;
+}
+
+body.has-lyrics:not(.open) #handle .pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  height: auto;
+  padding: 7px 0 9px;
+  border-radius: 0 0 18px 18px;
+  /* Read at a glance, so never faded: these words sit over whatever the
+     desktop happens to be showing and cannot afford to be shy. */
+  opacity: 1;
+  background: rgba(14, 16, 22, 0.74);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(14px);
+}
+
+/* The grab bar shrinks to a hint once the plate carries the text. */
+body.has-lyrics:not(.open) #handle .pill i {
+  width: 44px;
+  height: 2px;
+  opacity: 0.5;
+}
+
+/* Carried sideways, the plate still has to look like it is in hand. */
+body.moving.has-lyrics:not(.open) #handle .pill {
+  background: rgba(61, 139, 255, 0.62);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+/* A pale wallpaper behind the blur must not be able to swallow the words. */
 #lyrics-dock .lyric {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
   font-size: 14px;
@@ -1508,11 +1531,6 @@ body.no-media #repeat {
 #lyrics-dock .lyric.is-now {
   color: #ffffff;
   font-weight: 650;
-}
-
-/* The strip grows on hover; the plate steps down so they do not overlap. */
-body.hover #lyrics-dock {
-  top: 34px;
 }
 
 #ya-body .note {

@@ -54,12 +54,15 @@
 
     <div id="stage">
       <!-- the tab that hangs on the desktop while everything is closed -->
-      <div id="handle"><span class="pill"><i></i></span></div>
-
-      <!-- Where the two lines live while the shade is shut: right under the
-           strip, on a plate of their own. The window is click-through
-           everywhere but the strip itself, so the words never take the mouse. -->
-      <div id="lyrics-dock" class="lyric-window" hidden></div>
+      <!-- With the words on, the strip itself becomes the plate they are
+           written on: same thing, pressed to the top edge, rather than a
+           second slab hanging under it. -->
+      <div id="handle">
+        <span class="pill">
+          <i></i>
+          <div id="lyrics-dock" class="lyric-window" hidden></div>
+        </span>
+      </div>
 
       <!-- Every line of the song, stacked. Only two are ever in view; moving
            between them is a slide of the whole reel, so the eye follows the

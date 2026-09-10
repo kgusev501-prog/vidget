@@ -900,7 +900,7 @@ const lyricsDock = $('#lyrics-dock');
 const lyricReel = $('#lyric-reel');
 const lyricsBtn = $('#lyrics-btn');
 
-const words = { on: false, trackId: null, lines: null, shown: -2 };
+const words = { on: false, trackId: null, lines: null, shown: -2, handleH: 0 };
 
 /** Only tracks Yandex has timed words for can offer the button at all. */
 function paintLyricsButton() {
@@ -960,6 +960,20 @@ function buildReel(lines) {
   lyricReel.style.transition = '';
 }
 
+/**
+ * Tells the main process how far down the strip now reaches.
+ *
+ * Outside that rectangle the window is click-through, so without this the
+ * plate would be a picture you cannot grab — the pull-down would only work on
+ * the sliver of it that used to be the tab.
+ */
+function reportHandleHeight() {
+  const h = lyricsDock.hidden || isOpen ? 0 : Math.ceil(handle.getBoundingClientRect().height);
+  if (h === words.handleH) return;
+  words.handleH = h;
+  api.ui.handleHeight(h);
+}
+
 function paintLyrics() {
   const showing = !!(words.on && words.lines && words.lines.length);
   dockLyrics();
@@ -969,8 +983,10 @@ function paintLyrics() {
   body.classList.toggle('has-lyrics', showing);
   if (!showing) {
     words.shown = -2;
+    reportHandleHeight();
     return;
   }
+  reportHandleHeight();
 
   // Our own player knows exactly where it is; the extrapolated clock is only
   // for somebody else's playback, which has no words here anyway.

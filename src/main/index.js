@@ -216,13 +216,19 @@ function hasOwnChildWindow() {
 }
 
 /** The strip the closed shade actually responds to, in screen coordinates. */
+// With the words showing, the strip grows downward into a plate. The panel
+// measures itself and says how tall it now is; the width deliberately stays as
+// it was, so the long ends of a line hang over the desktop without taking the
+// mouse — the words can be read and what is behind them still clicked.
+let handleH = HANDLE_H;
+
 function handleRect() {
   const b = win.getBounds();
   return {
     x: b.x + Math.round((b.width - HANDLE_W) / 2),
     y: b.y,
     width: HANDLE_W,
-    height: HANDLE_H,
+    height: handleH,
   };
 }
 
@@ -726,6 +732,12 @@ function registerIpc() {
   ipcMain.on('ui:move-end', () => {
     moveGrab = null;
   });
+  // How tall the strip has become; only its own height, never anything wilder.
+  ipcMain.on('ui:handle-height', (_e, h) => {
+    const wanted = Math.round(Number(h) || 0);
+    handleH = Math.max(HANDLE_H, Math.min(160, wanted || HANDLE_H));
+  });
+
   ipcMain.on('ui:center', () => centerPanel());
 
   ipcMain.handle('media:snapshot', () => media.snapshot());
