@@ -5,7 +5,8 @@
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'none'; img-src 'self' data: blob: https://i.ytimg.com https://*.ytimg.com https://avatars.yandex.net;
                    style-src 'self' 'unsafe-inline'; script-src 'self';
-                   frame-src https://www.youtube.com https://music.yandex.ru; connect-src 'self';" />
+                   media-src https://*.yandex.net;
+                   frame-src https://www.youtube.com; connect-src 'self';" />
     <title>Vidget</title>
     <link rel="stylesheet" href="style.css" />
   </head>
@@ -78,9 +79,9 @@
 
             <div id="ym-strip" hidden></div>
 
-            <!-- Yandex's own player, parked out of sight: it is only here to
-                 make sound, and Windows lets the panel above drive it. -->
-            <div id="ym-engine"></div>
+            <!-- The widget's own sound. Yandex hands out a signed link to
+                 the track and this plays it; nothing else is involved. -->
+            <audio id="ym-audio" preload="auto"></audio>
 
             <div class="card player">
               <div id="art"><span id="art-letter">♫</span></div>

@@ -1413,24 +1413,6 @@ body.no-media #repeat {
   display: none;
 }
 
-/* Kept rendered but off the panel: hiding it outright would stop playback. */
-#ym-engine {
-  position: absolute;
-  left: -10000px;
-  top: 0;
-  width: 440px;
-  height: 100px;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-#ym-engine iframe {
-  display: block;
-  border: 0;
-  width: 440px;
-  height: 100px;
-}
-
 #ya-body .note {
   margin-top: 10px;
   font-size: 11.5px;

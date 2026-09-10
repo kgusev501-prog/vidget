@@ -407,22 +407,6 @@ function applyState(s) {
   }
   const ours = s.app === 'com.vidget.overlay' || s.app === 'electron.exe';
   appBox.textContent = ours && wave.on ? 'Моя волна' : APP_NAMES[s.app] || s.app || '';
-
-  // It started after all; nothing to warn about.
-  if (playWatch && ours && s.status === 'Playing') {
-    clearTimeout(playWatch);
-    playWatch = null;
-  }
-
-  // Without a Yandex sign-in the embedded player stops a track early; say so
-  // once instead of leaving the wave to look broken.
-  if (ours && wave.on && s.status !== 'Playing' && !yaStatus.web && !wave.warned) {
-    const expected = (wave.current && wave.current.durationMs) || 0;
-    if (expected && wave.playedMs < expected - 5000) {
-      wave.warned = true;
-      toast('Трек обрывается: войдите в Яндекс Музыку, чтобы слушать целиком');
-    }
-  }
   updateButtons();
 }
 
@@ -432,9 +416,8 @@ function updateButtons() {
   const play = $('#play');
   $('#play-use').setAttribute('href', playing ? '#i-pause' : '#i-play');
   play.disabled = !mediaState.active && !lastTrack && !yaStatus.connected;
-  // While the wave runs, skipping is ours to do regardless of what the system
-  // session reports — the embedded player exposes neither next nor previous.
-  const steering = wave.on && playingHere();
+  // Our own queue is ours to steer, whatever the system session reports.
+  const steering = wave.on && ownActive();
   $('#prev').disabled = !can.prev && !(steering && wave.history.length);
   $('#next').disabled = !can.next && !steering;
 
@@ -473,37 +456,6 @@ function setSeek(pos, dur) {
 }
 
 setInterval(() => {
-  // The wave advances on time actually played, whether or not the panel is open.
-  if (wave.on) {
-    const ours = playingHere();
-    if (ours && mediaState.status === 'Playing') {
-      wave.playedMs += 250;
-      wave.silentMs = 0;
-      wave.userPaused = false; // sounding again, however that was asked for
-      const total = wave.current && wave.current.durationMs;
-      if (total && wave.playedMs >= total - 400) advanceWave();
-    } else if (wave.playedMs > 4000 && !wave.userPaused && (!mediaState.active || ours)) {
-      // Our player went quiet by itself: the track is over, or the embed cut it
-      // short. Either way the wave should move on — but not while another app
-      // has taken over the sound, and not when the pause was asked for.
-      //
-      // A pause asked for anywhere but our own button — a media key, the volume
-      // overlay, unplugged headphones — used to look exactly like a track
-      // ending, and skipped it. Where a whole track can really play, which is
-      // what the sign-in buys, a pause is taken at its word. Without the
-      // sign-in the embed stops itself part way, and that has to move on.
-      const total = (wave.current && wave.current.durationMs) || 0;
-      const nearEnd = !total || wave.playedMs >= total - 5000;
-      if (ours && mediaState.status === 'Paused' && yaStatus.web && !nearEnd) {
-        wave.userPaused = true;
-        wave.silentMs = 0;
-      } else {
-        wave.silentMs += 250;
-        if (wave.silentMs >= 2500) advanceWave();
-      }
-    }
-  }
-
   if (!isOpen || seekDrag || activeTab !== 'music') return;
   const dur = clock.duration;
   setSeek(Math.min(currentPos(), dur || Infinity), dur);
@@ -524,12 +476,15 @@ $('#open-player').addEventListener('click', async () => {
 });
 
 $('#play').addEventListener('click', () => {
+  if (ownActive()) {
+    if (audio.paused) audio.play().catch(() => toast('Трек не запустился'));
+    else audio.pause();
+    return;
+  }
   if (!mediaState.active) {
     // An unfinished track gets picked up first; after it the wave takes over.
     return lastTrack ? resumeLastTrack() : startWave();
   }
-  // A pause asked for by hand must not read as the track having ended.
-  if (wave.on && playingHere()) wave.userPaused = mediaState.status === 'Playing';
   api.media.cmd('playpause');
 });
 
@@ -568,18 +523,12 @@ async function resumeLastTrack() {
 // The wave is ours to steer: Windows has no next/previous to offer for the
 // embedded player, so these drive the queue directly.
 $('#next').addEventListener('click', () => {
-  if (wave.on && playingHere()) return advanceWave();
+  if (wave.on && ownActive()) return advanceWave();
   api.media.cmd('next');
 });
 
 $('#prev').addEventListener('click', () => {
-  if (wave.on && playingHere() && wave.history.length) {
-    const back = wave.history.pop();
-    const keep = wave.history.slice();
-    playTrack(back);
-    wave.history = keep; // playTrack would otherwise re-add the track we left
-    return;
-  }
+  if (wave.on && ownActive() && wave.history.length) return goBack();
   api.media.cmd('prev');
 });
 $('#shuffle').addEventListener('click', () => api.media.cmd('shuffle', !mediaState.shuffle));
@@ -613,10 +562,16 @@ seekTrack.addEventListener('pointerup', (e) => {
   clock.anchorPos = pos;
   clock.anchorAt = Date.now();
   clock.reported = pos;
-  api.media.cmd('seek', pos);
+  if (ownActive()) audio.currentTime = pos;
+  else api.media.cmd('seek', pos);
 });
 
-api.media.onState(applyState);
+// While we are the one making the sound, SMTC only echoes us back — with a
+// lag, and through a PowerShell sidecar. Our own player is the better witness.
+api.media.onState((s) => {
+  smtcState = s || { active: false };
+  if (!ownActive()) applyState(smtcState);
+});
 
 // Two sources: whatever SMTC publishes, and the cover the Yandex API returns
 // for the resolved track. SMTC wins when it has one; the Yandex player has none.
@@ -814,9 +769,9 @@ function paintYaPanel() {
   $('#ya-connected').hidden = !yaStatus.connected;
   $('#ya-form').hidden = !!yaStatus.connected;
   $('#ya-login').textContent = yaStatus.login || 'аккаунт Яндекса';
-  $('#ya-web').textContent = yaStatus.web
-    ? 'Треки играют в панели целиком.'
-    : 'Вход в плеер не выполнен — трек в панели оборвётся примерно через сорок секунд. Нажмите «Отключить аккаунт» и войдите заново, чтобы это починить.';
+  // The panel plays the track itself now, straight from a link the API signs,
+  // so a browser session is no longer part of making sound.
+  $('#ya-web').textContent = 'Панель играет треки сама — приложение Яндекс Музыки для этого не нужно.';
   $('#m-ya').textContent = yaStatus.connected ? 'подключено' : 'не подключено';
 }
 
@@ -903,55 +858,139 @@ function showTrackResults(on) {
   showMusicPane(on ? 'results' : 'player');
 }
 
-const ymEngine = $('#ym-engine');
+// --- the widget's own player -------------------------------------------------
+// Sound used to come from Yandex's embedded page, parked off-screen. That page
+// loads its player from a host this connection cannot reach, so it arrived
+// empty and silent — and even when it worked, it reported nothing about
+// itself, which is why the wave had to guess from silence when a track ended.
+// Now the panel plays the track itself and simply knows.
+const audio = $('#ym-audio');
 
 // Anything the widget starts rolls on into Моя волна when it ends.
-// playedMs counts only time actually sounding, so a pause does not creep the
-// track towards its end and skip it.
-const wave = { on: false, current: null, history: [], playedMs: 0, silentMs: 0, userPaused: false, busy: false, warned: false };
+const wave = { on: false, current: null, history: [], busy: false };
 
-// Pending check that the track we asked for actually made a sound.
-let playWatch = null;
+// The track loaded into our own player, or null when the panel is only acting
+// as a remote for somebody else's.
+const own = { track: null, failures: 0 };
+const ownActive = () => !!own.track;
 
-const playingHere = () =>
-  mediaState.active && (mediaState.app === 'com.vidget.overlay' || mediaState.app === 'electron.exe');
+// The last thing SMTC said, so the panel can fall back to it once our own
+// player stops.
+let smtcState = { active: false };
+
+/**
+ * Publishes our player in the same shape the SMTC bridge uses.
+ *
+ * Everything above — the title, the seek bar, the clock, the buttons — was
+ * written against that shape, so speaking it means none of it has to change.
+ */
+function pushOwnState() {
+  const t = own.track;
+  if (!t) return;
+  applyState({
+    active: true,
+    app: 'com.vidget.overlay',
+    key: `own|${t.id}`,
+    title: t.title,
+    artist: t.artists,
+    status: audio.paused ? 'Paused' : 'Playing',
+    position: audio.currentTime || 0,
+    duration: audio.duration || (t.durationMs || 0) / 1000,
+    // Ours to do, all of it: the queue is right here.
+    can: { next: true, prev: true, seek: true, shuffle: false, repeat: false },
+    stampedAt: Date.now(),
+  });
+}
+
+/** Hands the panel back to whatever else Windows has, if anything. */
+function releaseOwn() {
+  own.track = null;
+  audio.removeAttribute('src');
+  audio.load();
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none';
+  applyState(smtcState);
+}
+
+// Windows shows this in the volume flyout and on the media keys.
+function describeOwn(track) {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: track.title || '',
+    artist: track.artists || '',
+    album: wave.on ? 'Моя волна' : 'Яндекс Музыка',
+    artwork: track.cover ? [{ src: track.cover, sizes: '200x200', type: 'image/jpeg' }] : [],
+  });
+}
+
+if ('mediaSession' in navigator) {
+  const handlers = {
+    play: () => ownActive() && audio.play().catch(() => {}),
+    pause: () => ownActive() && audio.pause(),
+    nexttrack: () => ownActive() && advanceWave(),
+    previoustrack: () => ownActive() && goBack(),
+  };
+  for (const [action, fn] of Object.entries(handlers)) {
+    try {
+      navigator.mediaSession.setActionHandler(action, fn);
+    } catch {
+      /* an action this build of Chromium does not know */
+    }
+  }
+}
+
+audio.addEventListener('playing', () => {
+  own.failures = 0;
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+  pushOwnState();
+});
+audio.addEventListener('pause', () => {
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+  pushOwnState();
+});
+audio.addEventListener('loadedmetadata', pushOwnState);
+audio.addEventListener('timeupdate', pushOwnState);
+
+// The honest end of a track — no guessing from silence any more.
+audio.addEventListener('ended', () => advanceWave());
+
+audio.addEventListener('error', () => {
+  if (!ownActive()) return;
+  // One bad track should not stop the wave, but a run of them means something
+  // larger is wrong and skipping forever would only hide it.
+  own.failures += 1;
+  if (!wave.on || own.failures >= 3) {
+    toast('Трек не проигрывается');
+    wave.on = false;
+    return releaseOwn();
+  }
+  toast('Трек не проигрывается, идём дальше');
+  advanceWave();
+});
 
 /** Hands the wave the track that just finished and starts the next one. */
 async function advanceWave() {
   if (wave.busy || !wave.on) return;
   wave.busy = true;
 
-  const played = wave.playedMs / 1000;
+  const played = audio.currentTime || 0;
   const res = await api.ya.waveNext(wave.current && wave.current.id, played);
   wave.busy = false;
 
   if (!res || !res.ok) {
     wave.on = false;
-    ymEngine.textContent = ''; // a finished embed keeps a media session alive
-    return toast((res && res.error) || 'Волна остановилась');
+    toast((res && res.error) || 'Волна остановилась');
+    return releaseOwn();
   }
   playTrack(res.track);
 }
 
-/**
- * Watches whether the track we asked for actually started.
- *
- * The embed is a page on someone else's origin: it cannot report back, and a
- * refusal to play looks exactly like a slow start. The one honest signal is a
- * media session appearing under our own name — so wait for one rather than
- * leave the panel saying "Включаем…" over silence.
- */
-function watchPlayback() {
-  if (playWatch) clearTimeout(playWatch);
-  playWatch = setTimeout(() => {
-    playWatch = null;
-    if (playingHere() && mediaState.status === 'Playing') return;
-    toast(
-      yaStatus.web
-        ? 'Трек не запустился — попробуйте ещё раз'
-        : 'Трек не запустился. Войдите в Яндекс Музыку: «⋯» → «Яндекс Музыка»'
-    );
-  }, 9000);
+/** Back to the track before this one, keeping the rest of the history. */
+function goBack() {
+  if (!wave.history.length) return;
+  const back = wave.history.pop();
+  const keep = wave.history.slice();
+  playTrack(back);
+  wave.history = keep; // playTrack would otherwise re-add the track we left
 }
 
 async function startWave() {
@@ -968,19 +1007,11 @@ async function startWave() {
 /**
  * Plays the chosen track and returns the panel to its usual controls.
  *
- * The sound comes from Yandex's own embedded player, parked off-screen: the
- * deep link into the desktop app only opens the track's page and waits for a
- * click, so it cannot start anything by itself. The embed registers a Windows
- * media session, which is how the buttons above keep working.
+ * The link is signed and stamped with a time, so it is fetched for every play
+ * rather than remembered.
  */
-function playTrack(track) {
+async function playTrack(track) {
   showMusicPane('player');
-
-  if (!track.albumId) {
-    toast('Открываем в приложении');
-    api.ya.play(track.id, track.albumId);
-    return;
-  }
 
   // Everything the widget plays becomes the start of a wave.
   if (wave.current && wave.current.id !== track.id) {
@@ -989,9 +1020,7 @@ function playTrack(track) {
   }
   wave.on = true;
   wave.current = track;
-  wave.playedMs = 0;
-  wave.silentMs = 0;
-  wave.userPaused = false;
+  own.track = track;
 
   lastTrack = {
     id: track.id,
@@ -1003,20 +1032,34 @@ function playTrack(track) {
   };
   api.app.setSetting('lastTrack', lastTrack);
 
-  if (!yaStatus.web) toast('Войдите в Яндекс Музыку, чтобы трек играл целиком');
+  describeOwn(track);
+  useCover(track.cover);
+  pushOwnState();
 
-  // Quiet whatever else is sounding — but never our own player. Rolling from
-  // one wave track to the next, this used to pause the very embed that was
-  // about to start.
-  if (!playingHere()) api.media.cmd('pause');
-  ymEngine.textContent = '';
+  // Quiet whatever else is sounding. Our own player is not on that list — it
+  // is about to start.
+  if (smtcState.active && smtcState.app !== 'com.vidget.overlay') api.media.cmd('pause');
 
-  const frame = document.createElement('iframe');
-  frame.allow = 'autoplay; encrypted-media';
-  frame.src = `https://music.yandex.ru/iframe/track/${track.id}/${track.albumId}?autoplay=1`;
-  ymEngine.append(frame);
   toast('Включаем…');
-  watchPlayback();
+  const res = await api.ya.stream(track.id);
+  if (own.track !== track) return; // the wave moved on while we were asking
+
+  if (!res || !res.ok) {
+    toast((res && res.error) || 'Трек не запустился');
+    if (wave.on && own.failures < 3) {
+      own.failures += 1;
+      return advanceWave();
+    }
+    wave.on = false;
+    return releaseOwn();
+  }
+  if (res.preview) toast('Яндекс отдал только фрагмент этого трека');
+
+  audio.src = res.url;
+  audio.play().catch((err) => {
+    if (own.track !== track) return;
+    toast(`Трек не запустился: ${err.message}`);
+  });
 }
 
 function clearTrackSearch() {
@@ -2639,7 +2682,8 @@ window.addEventListener('beforeunload', flushNote);
 async function refreshAll() {
   const snap = await api.media.snapshot();
   if (snap) {
-    applyState(snap.state);
+    smtcState = snap.state || { active: false };
+    applyState(smtcState);
     setArt(snap.art && snap.art.data);
     // Through the same door as a live report, so the slider and its tooltip do
     // not quietly forget which player they belong to.
