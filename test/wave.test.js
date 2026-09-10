@@ -11,6 +11,11 @@ function stubbed(answers) {
   ya.token = 'test';
   ya.uid = '1';
   ya.calls = [];
+  ya._text = async (url) => {
+    ya.calls.push({ path: url, method: 'TEXT' });
+    const answer = answers[url];
+    return typeof answer === 'function' ? answer() : answer || '';
+  };
   ya._req = async (path, opts = {}) => {
     ya.calls.push({ path, method: opts.method || 'GET', query: opts.query, json: opts.json });
     const answer = answers[path];
@@ -144,4 +149,91 @@ test('поиск: результат несёт всё нужное для во�
   assert.equal(t.albumId, '50');
   assert.equal(t.durationMs, 200000, 'без длительности волна не узнает, что трек кончился');
   assert.equal(t.duration, '3:20');
+});
+
+// ── ссылка на поток: на ней держится вся независимость виджета ──────────────
+const SIGN_XML = `<download-info>
+  <host>s1.storage.yandex.net</host>
+  <path>/get-mp3/x/y/track.mp3</path>
+  <ts>1a08a514b0d</ts>
+  <s>c0ffee</s>
+</download-info>`;
+
+const downloadInfo = (...variants) => ({ result: variants });
+
+test('поток: подписанная ссылка собирается за два запроса', async () => {
+  const ya = stubbed({
+    '/tracks/42/download-info': downloadInfo(
+      { codec: 'mp3', bitrateInKbps: 192, downloadInfoUrl: 'https://sign/192' },
+      { codec: 'mp3', bitrateInKbps: 320, downloadInfoUrl: 'https://sign/320' }
+    ),
+    'https://sign/320': SIGN_XML,
+  });
+
+  const res = await ya.streamUrl('42');
+  assert.equal(res.ok, true);
+  assert.equal(res.bitrate, 320, 'качество не режем');
+  assert.equal(res.preview, false);
+  assert.match(res.url, /^https:\/\/s1\.storage\.yandex\.net\/get-mp3\/[0-9a-f]{32}\/1a08a514b0d\/get-mp3\/x\/y\/track\.mp3$/);
+  assert.ok(
+    ya.calls.some((c) => c.path === 'https://sign/320'),
+    'за подписью ходили именно к лучшему варианту'
+  );
+});
+
+test('поток: превью честно помечается', async () => {
+  const ya = stubbed({
+    '/tracks/42/download-info': downloadInfo({
+      codec: 'mp3',
+      bitrateInKbps: 128,
+      preview: true,
+      downloadInfoUrl: 'https://sign/p',
+    }),
+    'https://sign/p': SIGN_XML,
+  });
+
+  assert.equal((await ya.streamUrl('42')).preview, true);
+});
+
+test('поток: трек, который нечем играть, не выдаётся за годный', async () => {
+  const ya = stubbed({ '/tracks/42/download-info': downloadInfo() });
+  const res = await ya.streamUrl('42');
+  assert.equal(res.ok, false);
+  assert.ok(res.error);
+});
+
+test('поток: обрезанная подпись не превращается в битую ссылку', async () => {
+  const ya = stubbed({
+    '/tracks/42/download-info': downloadInfo({ codec: 'mp3', bitrateInKbps: 320, downloadInfoUrl: 'https://sign/x' }),
+    'https://sign/x': '<download-info><host>s1</host></download-info>',
+  });
+
+  const res = await ya.streamUrl('42');
+  assert.equal(res.ok, false);
+  assert.match(res.error, /подпис/i);
+});
+
+test('поток: сбой сети возвращает ошибку, а не падение', async () => {
+  const ya = stubbed({});
+  ya._req = async () => {
+    throw new Error('Нет связи');
+  };
+  const res = await ya.streamUrl('42');
+  assert.equal(res.ok, false);
+  assert.equal(res.error, 'Нет связи');
+});
+
+test('поток: чужой id до сети не доходит', async () => {
+  const ya = stubbed({});
+  for (const bad of ['', null, 'abc', '1; drop', '../7']) {
+    const res = await ya.streamUrl(bad);
+    assert.equal(res.ok, false, `${bad} не должен считаться треком`);
+  }
+  assert.equal(ya.calls.length, 0, 'ни одного запроса за мусорный id');
+});
+
+test('поток: без подключённого аккаунта ссылку не просят', async () => {
+  const res = await new YandexMusic().streamUrl('42');
+  assert.equal(res.ok, false);
+  assert.match(res.error, /аккаунт/i);
 });

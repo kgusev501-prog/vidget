@@ -4,6 +4,7 @@ const { EventEmitter } = require('events');
 
 const { mmss, coverUrl, norm } = require('../shared/format');
 const { pickBestTrack } = require('../shared/match-track');
+const { pickVariant, parseSignature, buildStreamUrl } = require('../shared/stream-url');
 
 // The desktop client talks to this host; the like/dislike routes below are the
 // ones it calls itself.
@@ -358,6 +359,56 @@ class YandexMusic extends EventEmitter {
       };
     });
     return { ok: true, items };
+  }
+
+  // --- playback -------------------------------------------------------------
+  /** Fetches a body Yandex answers with as text; the sign endpoint is XML. */
+  async _text(url) {
+    const res = await fetch(url, {
+      headers: { Authorization: `OAuth ${this.token}`, 'Accept-Language': 'ru' },
+      signal: AbortSignal.timeout(TIMEOUT),
+    });
+    if (!res.ok) throw new Error(`Яндекс ответил ${res.status}`);
+    return res.text();
+  }
+
+  /**
+   * A playable link to a track, so the panel can sound by itself.
+   *
+   * This is what makes the widget independent: no desktop app, no embedded
+   * page from someone else's origin. Yandex hands out the audio in two steps —
+   * which files exist, then a signed link to one of them — and the link is
+   * stamped with a timestamp, so it is fetched fresh for every play rather
+   * than remembered.
+   */
+  async streamUrl(trackId) {
+    if (!this.connected) return { ok: false, error: 'Аккаунт не подключён' };
+    const id = String(trackId == null ? '' : trackId);
+    if (!/^\d{1,15}$/.test(id)) return { ok: false, error: 'Неизвестный трек' };
+
+    let info;
+    try {
+      info = await this._req(`/tracks/${id}/download-info`);
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+
+    const variant = pickVariant(info && info.result);
+    if (!variant || !variant.downloadInfoUrl) {
+      return { ok: false, error: 'Этот трек Яндекс проигрывать не даёт' };
+    }
+
+    let signature;
+    try {
+      signature = parseSignature(await this._text(variant.downloadInfoUrl));
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+
+    const url = buildStreamUrl(signature);
+    if (!url) return { ok: false, error: 'Яндекс не подписал ссылку на трек' };
+
+    return { ok: true, url, bitrate: variant.bitrateInKbps, preview: !!variant.preview };
   }
 
   _apply(hit) {
