@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('vidget', {
     move: (screenX) => ipcRenderer.send('ui:move', screenX),
     moveEnd: () => ipcRenderer.send('ui:move-end'),
     center: () => ipcRenderer.send('ui:center'),
+    // How tall the strip has grown, so the main process knows how much of the
+    // window stops being click-through.
+    handleHeight: (h) => ipcRenderer.send('ui:handle-height', h),
     onOpen: on('ui:open'),
     onClose: on('ui:close'),
   },
