@@ -607,6 +607,9 @@ async function init() {
   // idle timer says.
   powerMonitor.on('lock-screen', () => vault.lock('экран заблокирован'));
   powerMonitor.on('suspend', () => vault.lock('компьютер уснул'));
+  // Waking up looks a lot like booting: the network comes back a moment after
+  // everything else, so give the sign-in another run from the top.
+  powerMonitor.on('resume', () => yandex.retryNow());
 
   // Retries on its own: right after a reboot there is often no network yet.
   yandex.startAutoConnect(loadToken);

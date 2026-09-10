@@ -43,6 +43,7 @@ class YandexMusic extends EventEmitter {
     this.current = { key: null, id: null, albumId: null, cover: null, liked: false, disliked: false, state: 'idle' };
     this.tokenRejected = false;
     this._autoTimer = null;
+    this._getToken = null;
     this.lastSeen = null;
     this.wave = { queue: [], batchId: null };
   }
@@ -133,9 +134,17 @@ class YandexMusic extends EventEmitter {
   /**
    * Keeps trying to sign in with the stored token. On a fresh boot the widget
    * usually starts before the network is up, so a single attempt is not enough.
+   *
+   * The ladder used to end after about four and a half minutes and then give
+   * up for good. That is exactly the shape of the complaint this was written
+   * for: the machine comes back from a reboot, something on the way out is not
+   * ready yet, and the widget spends the rest of the day pretending it has no
+   * account. Only a token Yandex has actually refused is hopeless; everything
+   * else is worth asking about again, so the last step now repeats forever.
    */
   startAutoConnect(getToken) {
     this.stopAutoConnect();
+    this._getToken = getToken;
     const delays = [1000, 6000, 20000, 60000, 180000];
     let step = 0;
 
@@ -146,12 +155,34 @@ class YandexMusic extends EventEmitter {
       if (!token) return;
 
       await this.connect(token);
-      if (this.connected || this.tokenRejected || step >= delays.length - 1) return;
-      step += 1;
+      if (this.connected || this.tokenRejected) return;
+      if (step < delays.length - 1) step += 1;
       this._autoTimer = setTimeout(attempt, delays[step]);
     };
 
     this._autoTimer = setTimeout(attempt, delays[0]);
+  }
+
+  /**
+   * One attempt right now, because somebody pressed a button.
+   *
+   * Waiting out the retry ladder is fine for the widget's own housekeeping,
+   * but not for a person who just asked for music: they would get "подключите
+   * аккаунт" over an account that is connected in every sense but the timing.
+   */
+  async ensureConnected() {
+    if (this.connected) return true;
+    if (this.tokenRejected || !this._getToken) return false;
+    const token = this._getToken();
+    if (!token) return false;
+    await this.connect(token);
+    return this.connected;
+  }
+
+  /** Comes back from sleep, or the network returns: start over from the top. */
+  retryNow() {
+    if (this.connected || this.tokenRejected || !this._getToken) return;
+    this.startAutoConnect(this._getToken);
   }
 
   stopAutoConnect() {
@@ -292,7 +323,7 @@ class YandexMusic extends EventEmitter {
 
   /** First track of a fresh wave. */
   async waveStart() {
-    if (!this.connected) return { ok: false, error: 'Аккаунт не подключён' };
+    if (!(await this.ensureConnected())) return { ok: false, error: 'Аккаунт не подключён' };
     try {
       await this._waveFetch(null);
     } catch (err) {
@@ -306,7 +337,7 @@ class YandexMusic extends EventEmitter {
 
   /** Next track of the running wave, refilling the queue when it runs dry. */
   async waveNext(playedId, playedSeconds) {
-    if (!this.connected) return { ok: false, error: 'Аккаунт не подключён' };
+    if (!(await this.ensureConnected())) return { ok: false, error: 'Аккаунт не подключён' };
     if (playedId) {
       this._waveFeedback('trackFinished', {
         trackId: String(playedId),
@@ -334,7 +365,7 @@ class YandexMusic extends EventEmitter {
   async searchTracks(query, limit = 20) {
     const q = (query || '').trim();
     if (!q) return { ok: true, items: [] };
-    if (!this.connected) return { ok: false, error: 'Аккаунт не подключён' };
+    if (!(await this.ensureConnected())) return { ok: false, error: 'Аккаунт не подключён' };
 
     let body;
     try {
@@ -382,7 +413,7 @@ class YandexMusic extends EventEmitter {
    * than remembered.
    */
   async streamUrl(trackId) {
-    if (!this.connected) return { ok: false, error: 'Аккаунт не подключён' };
+    if (!(await this.ensureConnected())) return { ok: false, error: 'Аккаунт не подключён' };
     const id = String(trackId == null ? '' : trackId);
     if (!/^\d{1,15}$/.test(id)) return { ok: false, error: 'Неизвестный трек' };
 
