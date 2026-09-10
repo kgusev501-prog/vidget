@@ -150,6 +150,7 @@ api.ui.onOpen(() => {
   body.classList.remove('hover');
   body.classList.add('animating', 'open');
   setPull(0);
+  paintLyrics();
   refreshAll();
   // Anything that happened behind a closed shade gets said now, once there is
   // a panel for it to sit under.
@@ -165,6 +166,7 @@ api.ui.onClose(() => {
   body.classList.add('animating');
   body.classList.remove('open');
   setPull(0);
+  paintLyrics();
   hidePreview();
   closeYa();
   closeSettings();
@@ -887,8 +889,11 @@ let smtcState = { active: false };
 // that is a lyrics sheet, and somebody working with music on does not read a
 // sheet — they glance.
 const lyricsBox = $('#lyrics');
-const lyricNow = $('#lyric-now').firstElementChild;
-const lyricNext = $('#lyric-next').firstElementChild;
+const lyricsDock = $('#lyrics-dock');
+const lyricNowRow = $('#lyric-now');
+const lyricNextRow = $('#lyric-next');
+const lyricNow = lyricNowRow.firstElementChild;
+const lyricNext = lyricNextRow.firstElementChild;
 const lyricsBtn = $('#lyrics-btn');
 
 const words = { on: false, trackId: null, lines: null, shown: -2 };
@@ -925,11 +930,32 @@ async function loadLyrics(track) {
   paintLyrics();
 }
 
+/**
+ * Puts the two lines where they belong for the state the shade is in.
+ *
+ * The same two nodes move rather than a second copy being kept in step: one
+ * text, one place it is written, wherever that place happens to be.
+ */
+function dockLyrics() {
+  const home = isOpen ? lyricsBox : lyricsDock;
+  if (lyricNowRow.parentElement !== home) home.append(lyricNowRow, lyricNextRow);
+}
+
 function paintLyrics() {
-  const showing = words.on && words.lines && words.lines.length;
-  lyricsBox.hidden = !showing;
-  body.classList.toggle('has-lyrics', !!showing);
-  if (!showing) return;
+  const showing = !!(words.on && words.lines && words.lines.length);
+  dockLyrics();
+  // One of the two is always the wrong place to be, so exactly one shows.
+  lyricsBox.hidden = !showing || !isOpen;
+  lyricsDock.hidden = !showing || isOpen;
+  body.classList.toggle('has-lyrics', showing);
+  if (!showing) {
+    // Leaving the old line in place would flash it for a frame the next time
+    // words appear, before the first tick has worked out where we are.
+    lyricNow.textContent = '';
+    lyricNext.textContent = '';
+    words.shown = -2;
+    return;
+  }
 
   // Our own player knows exactly where it is; the extrapolated clock is only
   // for somebody else's playback, which has no words here anyway.

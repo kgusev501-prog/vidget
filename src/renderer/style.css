@@ -1414,6 +1414,66 @@ body.no-media #repeat {
 }
 
 /* ── текст песни ──────────────────────────────────────────── */
+/* Under the strip, while the shade is shut. Contrast is the whole job here:
+   these words land on top of whatever the desktop happens to be showing, so
+   they get their own dark plate rather than trusting the wallpaper. */
+#lyrics-dock {
+  position: absolute;
+  top: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  max-width: min(760px, 88%);
+  padding: 7px 18px 8px;
+  border-radius: 0 0 16px 16px;
+  background: rgba(14, 16, 22, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: none;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(14px);
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: center;
+  text-align: center;
+  animation: lyrics-rise 0.26s cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+/* Rising into place, the way the shade itself moves. */
+@keyframes lyrics-rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* On the plate the words carry themselves: heavier, brighter, with a shadow
+   so a pale wallpaper behind the blur cannot swallow them. */
+#lyrics-dock .lyric {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
+}
+
+#lyrics-dock #lyric-now {
+  font-size: 15px;
+  font-weight: 650;
+  color: #ffffff;
+}
+
+#lyrics-dock #lyric-next {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+/* The strip grows on hover; the plate steps down so they do not overlap. */
+body.hover #lyrics-dock {
+  top: 34px;
+}
+
 #lyrics {
   flex: 0 0 auto;
   display: flex;
