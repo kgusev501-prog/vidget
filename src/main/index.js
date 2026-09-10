@@ -787,6 +787,8 @@ function registerIpc() {
   );
   // The panel makes its own sound; this is the link it plays.
   ipcMain.handle('ya:stream', (_e, id) => yandex.streamUrl(id));
+  // Timed words for the same track, when Yandex has them.
+  ipcMain.handle('ya:lyrics', (_e, id) => yandex.lyricsFor(id));
 
   ipcMain.handle('ya:play', async (_e, { id, albumId } = {}) => {
     if (!/^\d{1,15}$/.test(String(id || ''))) return { ok: false };

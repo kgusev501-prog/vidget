@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('vidget', {
     waveNext: (playedId, playedSeconds) => ipcRenderer.invoke('ya:wave-next', { playedId, playedSeconds }),
     play: (id, albumId) => ipcRenderer.invoke('ya:play', { id, albumId }),
     stream: (id) => ipcRenderer.invoke('ya:stream', id),
+    lyrics: (id) => ipcRenderer.invoke('ya:lyrics', id),
     like: () => ipcRenderer.invoke('ya:like'),
     dislike: () => ipcRenderer.invoke('ya:dislike'),
     openAuth: () => ipcRenderer.send('ya:open-auth'),

@@ -237,3 +237,115 @@ test('поток: без подключённого аккаунта ссылк�
   assert.equal(res.ok, false);
   assert.match(res.error, /аккаунт/i);
 });
+
+// ── титры: их добывают тем же путём, что и звук ─────────────────────────────
+const LRC = '[ar: Кто-то]\n[00:01.55] Первая\n[00:18.97] Вторая\n';
+
+test('титры: приходят разобранными на строки со временем', async () => {
+  const ya = stubbed({
+    '/tracks/42/lyrics': { result: { downloadUrl: 'https://lyrics/42' } },
+    'https://lyrics/42': LRC,
+  });
+
+  const res = await ya.lyricsFor('42');
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.lines, [
+    { at: 1.55, text: 'Первая' },
+    { at: 18.97, text: 'Вторая' },
+  ]);
+
+  const call = ya.calls.find((c) => c.path === '/tracks/42/lyrics');
+  assert.equal(call.query.format, 'LRC', 'простыня без времени панели не нужна');
+  assert.ok(call.query.sign, 'без подписи Яндекс отвечает 403');
+  assert.ok(call.query.timeStamp);
+});
+
+test('титры: подпись считается от номера трека и метки времени', async () => {
+  const crypto = require('crypto');
+  const ya = stubbed({ '/tracks/42/lyrics': { result: { downloadUrl: 'https://lyrics/42' } }, 'https://lyrics/42': LRC });
+  await ya.lyricsFor('42');
+
+  const { query } = ya.calls.find((c) => c.path === '/tracks/42/lyrics');
+  const expected = crypto.createHmac('sha256', 'p93jhgh689SBReK6ghtw62').update(`42${query.timeStamp}`).digest('base64');
+  assert.equal(query.sign, expected);
+});
+
+test('титры: за файлом текста идут без токена', async () => {
+  const ya = stubbed({ '/tracks/42/lyrics': { result: { downloadUrl: 'https://lyrics/42' } }, 'https://lyrics/42': LRC });
+  const seen = [];
+  const inner = ya._text;
+  ya._text = async (url, opts) => {
+    seen.push(opts);
+    return inner(url, opts);
+  };
+
+  await ya.lyricsFor('42');
+  assert.deepEqual(seen[0], { auth: false }, 'хранилище текстов токена не ждёт и не любит');
+});
+
+test('титры: второй раз тот же трек по сети не гоняют', async () => {
+  const ya = stubbed({ '/tracks/42/lyrics': { result: { downloadUrl: 'https://lyrics/42' } }, 'https://lyrics/42': LRC });
+  await ya.lyricsFor('42');
+  const after = ya.calls.length;
+  const again = await ya.lyricsFor('42');
+
+  assert.equal(again.ok, true);
+  assert.equal(ya.calls.length, after, 'повтор трека не должен стоить двух запросов');
+});
+
+test('титры: «текста нет» тоже запоминается', async () => {
+  const ya = stubbed({ '/tracks/42/lyrics': { result: {} } });
+  assert.equal((await ya.lyricsFor('42')).ok, false);
+  const after = ya.calls.length;
+
+  const again = await ya.lyricsFor('42');
+  assert.equal(again.ok, false);
+  assert.equal(ya.calls.length, after, 'ходить второй раз за тем же «ничего» незачем');
+});
+
+test('титры: сбой сети не выдают за отсутствие текста', async () => {
+  let fail = true;
+  const ya = stubbed({
+    '/tracks/42/lyrics': () => {
+      if (fail) throw new Error('Нет связи');
+      return { result: { downloadUrl: 'https://lyrics/42' } };
+    },
+    'https://lyrics/42': LRC,
+  });
+
+  assert.equal((await ya.lyricsFor('42')).error, 'Нет связи');
+  fail = false;
+  assert.equal((await ya.lyricsFor('42')).ok, true, 'иначе один обрыв связи оставил бы трек немым навсегда');
+});
+
+test('титры: чужой id до сети не доходит', async () => {
+  const ya = stubbed({});
+  assert.equal((await ya.lyricsFor('../7')).ok, false);
+  assert.equal(ya.calls.length, 0);
+});
+
+test('титры: волна отмечает, у каких треков есть синхронный текст', async () => {
+  const withWords = rotorTrack(1, 'Со словами');
+  withWords.track.lyricsInfo = { hasAvailableSyncLyrics: true, hasAvailableTextLyrics: true };
+  const onlyPlain = rotorTrack(2, 'Простыня');
+  onlyPlain.track.lyricsInfo = { hasAvailableSyncLyrics: false, hasAvailableTextLyrics: true };
+
+  const ya = stubbed({ '/rotor/station/user:onyourwave/tracks': batch(withWords, onlyPlain) });
+  assert.equal((await ya.waveStart()).track.lyrics, true);
+  assert.equal((await ya.waveNext('1', 1)).track.lyrics, false, 'текст без времени за титры не считается');
+});
+
+test('титры: отказ «нет текста» переводится и запоминается', async () => {
+  let asked = 0;
+  const ya = stubbed({
+    '/tracks/42/lyrics': () => {
+      asked += 1;
+      throw new Error('No lyrics found for track');
+    },
+  });
+
+  const res = await ya.lyricsFor('42');
+  assert.equal(res.error, 'У этого трека нет текста', 'ответ Яндекса по-английски в панель не пускаем');
+  await ya.lyricsFor('42');
+  assert.equal(asked, 1, 'это ответ, а не сбой — спрашивать снова незачем');
+});

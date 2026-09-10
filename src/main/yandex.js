@@ -1,10 +1,12 @@
 'use strict';
 
+const crypto = require('crypto');
 const { EventEmitter } = require('events');
 
 const { mmss, coverUrl, norm } = require('../shared/format');
 const { pickBestTrack } = require('../shared/match-track');
 const { pickVariant, parseSignature, buildStreamUrl } = require('../shared/stream-url');
+const { parseLrc } = require('../shared/lrc');
 
 // The desktop client talks to this host; the like/dislike routes below are the
 // ones it calls itself.
@@ -14,6 +16,11 @@ const AUTH_URL = `https://oauth.yandex.ru/authorize?response_type=token&client_i
 
 const TIMEOUT = 9000;
 const LIKES_TTL = 10 * 60 * 1000;
+
+// The key the Yandex clients sign a lyrics request with. Like the download
+// salt above it is carried by every client rather than kept secret, but the
+// endpoint answers 403 "Invalid Sign" without it.
+const LYRICS_KEY = 'p93jhgh689SBReK6ghtw62';
 
 // "Моя волна" is a rotor station; the API hands out a few tracks at a time and
 // expects to hear back which of them were played.
@@ -40,6 +47,7 @@ class YandexMusic extends EventEmitter {
 
     this.tracks = new Map(); // "artist|title" -> { id, albumId, cover } | null
     this.covers = new Map(); // track id -> data URL
+    this.lyrics = new Map(); // track id -> [{ at, text }] | null
     this.current = { key: null, id: null, albumId: null, cover: null, liked: false, disliked: false, state: 'idle' };
     this.tokenRejected = false;
     this._autoTimer = null;
@@ -194,6 +202,7 @@ class YandexMusic extends EventEmitter {
     this.stopAutoConnect();
     this.tokenRejected = false;
     this.covers.clear();
+    this.lyrics.clear();
     this.current = { key: null, id: null, albumId: null, cover: null, liked: false, disliked: false, state: 'idle' };
     this.token = null;
     this.uid = null;
@@ -294,6 +303,8 @@ class YandexMusic extends EventEmitter {
       durationMs: t.durationMs || 0,
       cover: coverUrl(t.coverUri || album.coverUri, '200x200'),
       liked: this.liked.has(String(t.id)),
+      // Only synced words are offered, so this is what the button asks about.
+      lyrics: !!(t.lyricsInfo && t.lyricsInfo.hasAvailableSyncLyrics),
       wave: true,
     };
   }
@@ -387,16 +398,23 @@ class YandexMusic extends EventEmitter {
         durationMs: t.durationMs || 0,
         cover: coverUrl(t.coverUri || (album && album.coverUri), '100x100'),
         liked: this.liked.has(id),
+        lyrics: !!(t.lyricsInfo && t.lyricsInfo.hasAvailableSyncLyrics),
       };
     });
     return { ok: true, items };
   }
 
   // --- playback -------------------------------------------------------------
-  /** Fetches a body Yandex answers with as text; the sign endpoint is XML. */
-  async _text(url) {
+  /**
+   * Fetches a body Yandex answers with as text; the sign endpoint is XML and
+   * the lyrics endpoint hands back an LRC file.
+   *
+   * The file itself sits on storage that wants no token — and is happier
+   * without one — so authorisation is asked for rather than assumed.
+   */
+  async _text(url, { auth = true } = {}) {
     const res = await fetch(url, {
-      headers: { Authorization: `OAuth ${this.token}`, 'Accept-Language': 'ru' },
+      headers: auth ? { Authorization: `OAuth ${this.token}`, 'Accept-Language': 'ru' } : undefined,
       signal: AbortSignal.timeout(TIMEOUT),
     });
     if (!res.ok) throw new Error(`Яндекс ответил ${res.status}`);
@@ -440,6 +458,61 @@ class YandexMusic extends EventEmitter {
     if (!url) return { ok: false, error: 'Яндекс не подписал ссылку на трек' };
 
     return { ok: true, url, bitrate: variant.bitrateInKbps, preview: !!variant.preview };
+  }
+
+  /**
+   * The words of a track, timed, so the panel can follow along.
+   *
+   * Only synced lyrics count. Yandex also serves a plain wall of text for some
+   * tracks, but a line nobody can point at in time is no help to somebody
+   * trying to sing with the music — the panel would rather say there is
+   * nothing than show words that do not move.
+   *
+   * A track with no lyrics is remembered as such: asking again on every replay
+   * would be a round trip to learn the same nothing.
+   */
+  async lyricsFor(trackId) {
+    const id = String(trackId == null ? '' : trackId);
+    if (!/^\d{1,15}$/.test(id)) return { ok: false, error: 'Неизвестный трек' };
+    if (this.lyrics.has(id)) {
+      const cached = this.lyrics.get(id);
+      return cached ? { ok: true, lines: cached } : { ok: false, error: 'У этого трека нет текста' };
+    }
+    if (!(await this.ensureConnected())) return { ok: false, error: 'Аккаунт не подключён' };
+
+    const timeStamp = Math.floor(Date.now() / 1000);
+    const sign = crypto.createHmac('sha256', LYRICS_KEY).update(`${id}${timeStamp}`).digest('base64');
+
+    let info;
+    try {
+      info = await this._req(`/tracks/${id}/lyrics`, { query: { format: 'LRC', timeStamp, sign } });
+    } catch (err) {
+      // Yandex says "No lyrics found for track" for a song nobody has written
+      // down. That is an answer, not a failure: remember it, and say it in the
+      // language the panel speaks. Anything else — no network, a hiccup on the
+      // way — must not poison the cache, or one dropped connection would leave
+      // the track silent for the rest of the run.
+      if (/lyrics/i.test(err.message)) {
+        this.lyrics.set(id, null);
+        return { ok: false, error: 'У этого трека нет текста' };
+      }
+      return { ok: false, error: err.message };
+    }
+
+    const downloadUrl = info && info.result && info.result.downloadUrl;
+    let lines = [];
+    if (downloadUrl) {
+      try {
+        lines = parseLrc(await this._text(downloadUrl, { auth: false }));
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    }
+
+    if (this.lyrics.size > 200) this.lyrics.clear();
+    this.lyrics.set(id, lines.length ? lines : null);
+    if (!lines.length) return { ok: false, error: 'У этого трека нет текста' };
+    return { ok: true, lines };
   }
 
   _apply(hit) {
