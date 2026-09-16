@@ -338,12 +338,14 @@ body.open #panel {
 /* The cover follows the card rather than holding it open. With the words shown
    the card is squeezed, and a fixed 84px square used to stick out above and
    below it — reading as an empty frame with the picture gone. Now it shrinks
-   with the card, stays square, and never grows past its full size. */
+   with the card, stays square and never grows past its full size — and
+   nothing else in the tab moves to make room for it. */
 #art {
-  height: min(84px, 100%);
+  /* The card's own padding is room too: the square may reach within 4px of
+     its border, so a squeezed card still shows a real picture. */
+  height: min(84px, calc(100% + 24px));
   width: auto;
   aspect-ratio: 1;
-  min-height: 34px;
   flex: 0 0 auto;
   align-self: center;
   border-radius: 10px;
@@ -1516,11 +1518,26 @@ body.has-lyrics:not(.open) #handle .pill {
   backdrop-filter: blur(14px);
 }
 
-/* The grab bar shrinks to a hint once the plate carries the text. */
+/* The grab bar sits on the plate's bottom edge, where a hand reaches for a
+   shade that pulls down: it reads as the handle rather than as a stray line
+   over the words. It brightens under the cursor to say it can be taken. */
+body.has-lyrics:not(.open) #handle .pill {
+  padding: 9px 0 6px;
+}
+
 body.has-lyrics:not(.open) #handle .pill i {
-  width: 44px;
-  height: 2px;
-  opacity: 0.5;
+  order: 2;
+  width: 54px;
+  height: 3px;
+  margin-top: 7px;
+  opacity: 0.55;
+  transition: opacity 0.18s ease, width 0.22s cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+body.hover.has-lyrics:not(.open) #handle .pill i,
+body.moving.has-lyrics:not(.open) #handle .pill i {
+  width: 72px;
+  opacity: 1;
 }
 
 /* Carried sideways, the plate still has to look like it is in hand. */
@@ -2142,45 +2159,4 @@ body.vault-hint #handle .pill {
 
 body.vault-hint #handle .pill i {
   background: var(--accent);
-}
-
-/* ── the music tab with the words open ───────────────────── */
-/* Two lines of words have to come from somewhere in a shade of fixed height.
-   They come out of the spacing and the little "playing in…" caption, so the
-   card — and the cover in it — gives up as little as possible. */
-body.has-lyrics.open .view[data-view="music"] {
-  gap: 6px;
-}
-
-body.has-lyrics.open .player {
-  padding-block: 8px;
-}
-
-body.has-lyrics.open #seek {
-  margin-top: 6px;
-}
-
-body.has-lyrics.open #np-app {
-  display: none;
-}
-
-/* On a short screen the card can end up lower than three lines of text. Then
-   the performer goes (the words above already say what is playing) and the
-   seek bar tucks in, rather than the text spilling over the card's edges. */
-.player {
-  container: player / size;
-}
-
-@container player (max-height: 72px) {
-  #np-artist {
-    display: none;
-  }
-
-  #seek {
-    margin-top: 3px;
-  }
-
-  #np-title {
-    font-size: 14px;
-  }
 }
