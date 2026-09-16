@@ -335,10 +335,17 @@ body.open #panel {
   min-height: 0;
 }
 
+/* The cover follows the card rather than holding it open. With the words shown
+   the card is squeezed, and a fixed 84px square used to stick out above and
+   below it — reading as an empty frame with the picture gone. Now it shrinks
+   with the card, stays square, and never grows past its full size. */
 #art {
-  width: 84px;
-  height: 84px;
+  height: min(84px, 100%);
+  width: auto;
+  aspect-ratio: 1;
+  min-height: 34px;
   flex: 0 0 auto;
+  align-self: center;
   border-radius: 10px;
   background: linear-gradient(145deg, #3a3f4c, #22252d);
   display: grid;
@@ -2135,4 +2142,45 @@ body.vault-hint #handle .pill {
 
 body.vault-hint #handle .pill i {
   background: var(--accent);
+}
+
+/* ── the music tab with the words open ───────────────────── */
+/* Two lines of words have to come from somewhere in a shade of fixed height.
+   They come out of the spacing and the little "playing in…" caption, so the
+   card — and the cover in it — gives up as little as possible. */
+body.has-lyrics.open .view[data-view="music"] {
+  gap: 6px;
+}
+
+body.has-lyrics.open .player {
+  padding-block: 8px;
+}
+
+body.has-lyrics.open #seek {
+  margin-top: 6px;
+}
+
+body.has-lyrics.open #np-app {
+  display: none;
+}
+
+/* On a short screen the card can end up lower than three lines of text. Then
+   the performer goes (the words above already say what is playing) and the
+   seek bar tucks in, rather than the text spilling over the card's edges. */
+.player {
+  container: player / size;
+}
+
+@container player (max-height: 72px) {
+  #np-artist {
+    display: none;
+  }
+
+  #seek {
+    margin-top: 3px;
+  }
+
+  #np-title {
+    font-size: 14px;
+  }
 }
