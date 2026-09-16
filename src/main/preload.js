@@ -111,6 +111,7 @@ contextBridge.exposeInMainWorld('vidget', {
     saveAttachment: (id, name) => ipcRenderer.invoke('vault:save-attachment', { id, name }),
     pickFile: (what) => ipcRenderer.invoke('vault:pick-file', what),
     groups: () => ipcRenderer.invoke('vault:groups'),
+    inGroup: (id) => ipcRenderer.invoke('vault:in-group', id),
     create: (groupId, fields) => ipcRenderer.invoke('vault:create', { groupId, fields }),
     update: (id, fields) => ipcRenderer.invoke('vault:update', { id, fields }),
     remove: (id) => ipcRenderer.invoke('vault:delete', id),

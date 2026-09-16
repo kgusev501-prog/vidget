@@ -213,12 +213,23 @@
             <!-- open -->
             <div id="vault-open-pane" hidden>
               <div class="toolbar">
+                <button id="vault-groups-btn" class="icon-btn" title="Группы"><svg class="i"><use href="#i-folder"/></svg></button>
                 <input id="vault-search" type="search" placeholder="Поиск по паролям…  (Enter — напечатать)" spellcheck="false" autocomplete="off" />
                 <button id="vault-add" class="icon-btn" title="Добавить запись">+</button>
                 <button id="vault-lock" class="icon-btn" title="Закрыть базу"><svg class="i"><use href="#i-unlock"/></svg></button>
               </div>
               <div id="vault-window" hidden></div>
-              <div id="vault-list"></div>
+              <!-- The groups of the database on the left, as KeePass shows them,
+                   and the entries of the chosen one beside them. On a side edge
+                   the panel is a phone, and the tree becomes a folder list the
+                   entries are opened from. -->
+              <div id="vault-body">
+                <nav id="vault-tree"></nav>
+                <div id="vault-main">
+                  <button id="vault-crumb" hidden></button>
+                  <div id="vault-list"></div>
+                </div>
+              </div>
               <div id="vault-empty" class="empty">Ничего не нашлось</div>
             </div>
           </div>

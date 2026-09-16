@@ -280,6 +280,7 @@ class Vault extends EventEmitter {
       for (const entry of group.entries || []) {
         const summary = this._summarise(entry, here, canSearch, canType);
         if (!summary) continue;
+        summary.groupId = idOf(group);
         this.entries.push(summary);
         this.byId.set(summary.id, { entry, group });
       }
@@ -474,20 +475,53 @@ class Vault extends EventEmitter {
     return { ok: true };
   }
 
-  /** The groups an entry can be put in, as a flat list of paths. */
+  /**
+   * The group tree, flattened in the order KeePass shows it.
+   *
+   * Each group knows its depth and parent, so the panel can draw the tree with
+   * indents and fold branches, and how many entries it holds — directly and
+   * with everything under it — so an empty branch can say so before it is
+   * opened. The recycle bin is left out, as it is everywhere else here.
+   */
   groups() {
     this.touch();
     if (!this.db) return [];
     const binId = this.db.meta.recycleBinUuid && this.db.meta.recycleBinUuid.id;
+    const direct = new Map();
+    for (const e of this.list()) direct.set(e.groupId, (direct.get(e.groupId) || 0) + 1);
+
     const out = [];
-    const walk = (group, trail) => {
-      if (!group || (binId && idOf(group) === binId)) return;
+    const walk = (group, trail, depth, parentId) => {
+      if (!group || (binId && idOf(group) === binId)) return 0;
+      const id = idOf(group);
       const here = trail ? `${trail} / ${group.name}` : group.name;
-      out.push({ id: idOf(group), path: here });
-      for (const child of group.groups || []) walk(child, here);
+      const node = { id, name: group.name, path: here, depth, parentId, count: direct.get(id) || 0, total: 0, children: 0 };
+      out.push(node);
+      let total = node.count;
+      for (const child of group.groups || []) {
+        if (binId && idOf(child) === binId) continue;
+        node.children += 1;
+        total += walk(child, here, depth + 1, id);
+      }
+      node.total = total;
+      return total;
     };
-    for (const root of this.db.groups || []) walk(root, '');
+    for (const root of this.db.groups || []) walk(root, '', 0, null);
     return out;
+  }
+
+  /** Entries in a group and in every group under it. */
+  inGroup(groupId) {
+    this.touch();
+    const top = groupId && this._groupById(groupId);
+    if (!top) return [];
+    const ids = new Set();
+    const walk = (group) => {
+      ids.add(idOf(group));
+      for (const child of group.groups || []) walk(child);
+    };
+    walk(top);
+    return this.list().filter((e) => ids.has(e.groupId));
   }
 
   _groupById(id) {

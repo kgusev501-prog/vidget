@@ -205,6 +205,7 @@ $('#backdrop').addEventListener('pointerdown', () => api.ui.requestClose());
 
 api.ui.onOpen(() => {
   isOpen = true;
+  resumeVaultPlace();
   body.classList.remove('hover');
   body.classList.add('animating', 'open');
   setPull(0);
@@ -229,14 +230,12 @@ api.ui.onClose(() => {
   closeYa();
   closeSettings();
   closeMenu();
-  closeVaultEntry();
   closeVaultMenu();
-  closeVaultForm();
-  // Nothing about the passwords stays on screen behind a closed shade.
-  if (vaultSearch.value) {
-    vaultSearch.value = '';
-    if (vaultStatus.unlocked) refreshVaultList();
-  }
+  // Where the user was among the passwords is kept for a few minutes: the
+  // usual round trip is to copy the login, paste it, and come back for the
+  // password — landing at the top of the list again would mean hunting for
+  // the same entry twice. What was revealed is hidden again at once, though.
+  keepVaultPlace();
   $('#vault-password').value = '';
   if (!noteEditor.hidden) closeNote();
 });
@@ -2009,6 +2008,8 @@ function paintVaultPanes() {
     vaultItems = [];
     vaultList.textContent = '';
     closeVaultEntry();
+    // A locked database has nothing to come back to.
+    if (typeof forgetVaultPlace === 'function' && vaultPlace) forgetVaultPlace();
   }
 }
 
@@ -2056,7 +2057,7 @@ function renderVaultList() {
 
     const info = el('div', 'pinfo');
     info.append(el('div', 'pname', item.title));
-    const under = [item.user, item.group].filter(Boolean).join('  ·  ');
+    const under = [item.user, shortGroupPath(item.group)].filter(Boolean).join('  ·  ');
     info.append(el('div', 'puser', under));
     row.append(info);
 
@@ -2097,9 +2098,13 @@ async function refreshVaultList(keepCursor = false) {
   if (!vaultStatus.unlocked) return;
   const query = vaultSearch.value.trim();
   vaultSuggested = new Map();
+  await loadVaultGroups();
 
   let items = [];
-  if (!query) {
+  if (!query && vaultGroup) {
+    // A group chosen in the tree: its entries and those of the groups under it.
+    items = await api.vault.inGroup(vaultGroup);
+  } else if (!query) {
     const suited = await api.vault.forWindow();
     vaultWindow = suited.window || vaultWindow;
     for (const hit of suited.items) vaultSuggested.set(hit.entry.id, hit.why);
@@ -2114,15 +2119,123 @@ async function refreshVaultList(keepCursor = false) {
   if (!keepCursor) vaultCursor = items.length ? 0 : -1;
   else vaultCursor = Math.min(vaultCursor, items.length - 1);
   renderVaultList();
+  renderVaultTree();
   paintVaultWindow();
 }
 
-async function loadVault(focusSearch = false) {
+// --- the group tree ---------------------------------------------------------
+// KeePass users sort their passwords into groups and find them there. The tree
+// sits beside the list in the wide panel; on a side edge, where the panel is a
+// phone, it becomes a list of folders opened from a bar above the entries.
+let vaultGroups = [];
+let vaultGroup = null; // chosen group id, or null for everything
+const vaultFolded = new Set(); // groups whose branch is folded away
+
+async function loadVaultGroups() {
+  vaultGroups = vaultStatus.unlocked ? await api.vault.groups() : [];
+  // A group that disappeared — deleted in KeePass — takes the choice with it.
+  if (vaultGroup && !vaultGroups.some((g) => g.id === vaultGroup)) vaultGroup = null;
+}
+
+const groupById = (id) => vaultGroups.find((g) => g.id === id);
+
+/**
+ * A group path without the database's own root in front: every path starts
+ * with it, so it says nothing and only pushes the useful part out of view.
+ */
+function shortGroupPath(path) {
+  const root = vaultGroups.length && vaultGroups[0].depth === 0 ? vaultGroups[0].name : null;
+  if (!root || !path) return path || '';
+  if (path === root) return '';
+  return path.startsWith(`${root} / `) ? path.slice(root.length + 3) : path;
+}
+
+/** Hidden when any group above it is folded. */
+function groupVisible(group) {
+  let parent = group.parentId && groupById(group.parentId);
+  while (parent) {
+    if (vaultFolded.has(parent.id)) return false;
+    parent = parent.parentId && groupById(parent.parentId);
+  }
+  return true;
+}
+
+function renderVaultTree() {
+  const tree = $('#vault-tree');
+  tree.textContent = '';
+  const searching = !!vaultSearch.value.trim();
+
+  const all = el('button', `vtree-row all${!vaultGroup ? ' current' : ''}`);
+  all.dataset.group = '';
+  all.append(svgIcon('key'));
+  all.append(el('span', 'vtree-name', 'Все записи'));
+  tree.append(all);
+
+  // A database has one root group and the real ones under it; showing the root
+  // as a level of its own would only push everything one step to the right.
+  const rootId = vaultGroups.length && vaultGroups[0].depth === 0 ? vaultGroups[0].id : null;
+  for (const group of vaultGroups) {
+    if (group.id === rootId) continue;
+    if (!groupVisible(group)) continue;
+    const depth = rootId ? group.depth - 1 : group.depth;
+    const row = el('button', `vtree-row${group.id === vaultGroup ? ' current' : ''}${group.total ? '' : ' no-entries'}`);
+    row.dataset.group = group.id;
+    row.style.paddingLeft = `${8 + depth * 14}px`;
+    row.title = group.path;
+
+    const fold = el('span', `vtree-fold${group.children ? '' : ' none'}${vaultFolded.has(group.id) ? ' folded' : ''}`);
+    fold.dataset.fold = group.id;
+    if (group.children) fold.append(svgIcon('back'));
+    row.append(fold);
+    row.append(svgIcon('folder'));
+    row.append(el('span', 'vtree-name', group.name));
+    if (group.total) row.append(el('span', 'vtree-count', String(group.total)));
+    tree.append(row);
+  }
+
+  // Searching looks through everything, whatever is chosen in the tree.
+  tree.classList.toggle('searching', searching);
+
+  const crumb = $('#vault-crumb');
+  const chosen = vaultGroup && groupById(vaultGroup);
+  crumb.textContent = '';
+  crumb.append(svgIcon('folder'));
+  crumb.append(el('span', null, searching ? 'Поиск по всем группам' : chosen ? shortGroupPath(chosen.path) || chosen.name : 'Все записи'));
+  crumb.append(el('span', 'vcrumb-hint', 'группы'));
+}
+
+function chooseVaultGroup(id) {
+  vaultGroup = id || null;
+  document.body.classList.remove('vault-tree-open');
+  if (vaultSearch.value) vaultSearch.value = '';
+  refreshVaultList();
+}
+
+$('#vault-tree').addEventListener('click', (e) => {
+  const fold = e.target.closest('[data-fold]');
+  if (fold && fold.dataset.fold) {
+    e.stopPropagation();
+    const id = fold.dataset.fold;
+    if (vaultFolded.has(id)) vaultFolded.delete(id);
+    else vaultFolded.add(id);
+    renderVaultTree();
+    return;
+  }
+  const row = e.target.closest('.vtree-row');
+  if (row) chooseVaultGroup(row.dataset.group);
+});
+
+// On the phone-shaped panel the tree lives behind the folder bar.
+const toggleVaultTree = () => document.body.classList.toggle('vault-tree-open');
+$('#vault-crumb').addEventListener('click', toggleVaultTree);
+$('#vault-groups-btn').addEventListener('click', toggleVaultTree);
+
+async function loadVault(focusSearch = false, keepCursor = false) {
   vaultStatus = await api.vault.status();
   vaultWindow = vaultStatus.window || vaultWindow;
   paintVaultPanes();
   paintVaultWindow();
-  if (vaultStatus.unlocked) await refreshVaultList();
+  if (vaultStatus.unlocked) await refreshVaultList(keepCursor || !!vaultPlace);
   if (focusSearch) {
     const box = vaultStatus.unlocked ? vaultSearch : $('#vault-password');
     setTimeout(() => box.focus(), 60);
@@ -2350,7 +2463,8 @@ async function openVaultEntry(id) {
   vaultEntryId = id;
   stopTotpTimer();
 
-  $('#ve-title').textContent = item.title + (item.group ? `  ·  ${item.group}` : '');
+  const where = shortGroupPath(item.group);
+  $('#ve-title').textContent = item.title + (where ? `  ·  ${where}` : '');
   const body = $('#ve-body');
   body.textContent = '';
 
@@ -2483,6 +2597,68 @@ function closeVaultEntry() {
   vaultEntry.hidden = true;
 }
 
+// --- remembering where the user was -----------------------------------------
+const VAULT_KEEP_MS = 3 * 60 * 1000;
+let vaultPlace = null; // { at, window } while a place among the passwords is kept
+let vaultPlaceTimer = null;
+
+/** The shade closed: hold on to the search, the list position and any open card. */
+function keepVaultPlace() {
+  const somewhere = !vaultEntry.hidden || !vaultForm.hidden || vaultSearch.value || activeTab === 'vault';
+  if (!somewhere || !vaultStatus.unlocked) {
+    forgetVaultPlace();
+    return;
+  }
+  vaultPlace = { at: Date.now(), window: vaultWindow && vaultWindow.title };
+
+  // Re-drawing the card masks every value that was shown and stops the
+  // one-time code ticking behind a closed shade.
+  if (vaultEntryId) {
+    const id = vaultEntryId;
+    openVaultEntry(id).then(() => {
+      if (!isOpen) stopTotpTimer();
+    });
+  }
+  const typed = $('#vf-password');
+  if (typed) {
+    typed.type = 'password';
+    $('#vf-eye-use').setAttribute('href', '#i-eye');
+  }
+
+  if (vaultPlaceTimer) clearTimeout(vaultPlaceTimer);
+  vaultPlaceTimer = setTimeout(() => {
+    if (!isOpen) forgetVaultPlace();
+  }, VAULT_KEEP_MS);
+}
+
+/** Back to the top of the list, the way the tab looks when first opened. */
+function forgetVaultPlace() {
+  if (vaultPlaceTimer) clearTimeout(vaultPlaceTimer);
+  vaultPlaceTimer = null;
+  const had = !!vaultPlace;
+  vaultPlace = null;
+  closeVaultEntry();
+  closeVaultForm();
+  if (vaultSearch.value) vaultSearch.value = '';
+  vaultGroup = null;
+  document.body.classList.remove('vault-tree-open');
+  if (had && vaultStatus.unlocked) refreshVaultList();
+}
+
+/** The shade opened again: carry on from the kept place, if it is still fresh. */
+function resumeVaultPlace() {
+  if (!vaultPlace) return;
+  if (Date.now() - vaultPlace.at > VAULT_KEEP_MS || !vaultStatus.unlocked) {
+    forgetVaultPlace();
+    return;
+  }
+  if (vaultPlaceTimer) clearTimeout(vaultPlaceTimer);
+  vaultPlaceTimer = null;
+  // The card comes back masked; its one-time code starts ticking again.
+  if (vaultEntryId && !vaultEntry.hidden) openVaultEntry(vaultEntryId);
+  vaultPlace = null;
+}
+
 $('#ve-back').addEventListener('click', closeVaultEntry);
 $('#ve-type').addEventListener('click', () => {
   if (vaultEntryId) vaultType(vaultEntryId);
@@ -2526,8 +2702,11 @@ async function openVaultForm(id) {
     picker.append(option);
   }
   if (item) {
-    const match = [...picker.options].find((o) => o.textContent === item.group);
+    const match = [...picker.options].find((o) => o.value === item.groupId || o.textContent === item.group);
     if (match) picker.value = match.value;
+  } else if (vaultGroup) {
+    // A new entry goes where the user is looking.
+    picker.value = vaultGroup;
   }
 
   vaultForm.hidden = false;
@@ -2677,9 +2856,14 @@ api.vault.onHint((on) => body.classList.toggle('vault-hint', !!on));
 // Opened by its own hotkey: straight to the passwords, with the cursor where
 // typing will do something.
 api.vault.onOpen((payload) => {
-  if (payload && payload.window) vaultWindow = payload.window;
+  const front = payload && payload.window;
+  // Summoned from a different window, the user wants what suits that window,
+  // not the entry they were looking at for another site.
+  if (vaultPlace && front && front.title !== vaultPlace.window) forgetVaultPlace();
+  if (front) vaultWindow = front;
   selectTab('vault');
-  loadVault(true);
+  if (vaultPlace) loadVault(false, true);
+  else loadVault(true);
 });
 
 // ============================================================

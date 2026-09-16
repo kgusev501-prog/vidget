@@ -2755,3 +2755,199 @@ body.portrait .vfield .vname {
 body.portrait .vf-name {
   flex-basis: 76px;
 }
+
+/* ── the group tree in the password tab ──────────────────── */
+#vault-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 10px;
+  position: relative;
+}
+
+#vault-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#vault-tree {
+  flex: 0 0 196px;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-right: 8px;
+  border-right: 1px solid var(--line);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+/* While searching the tree has no say, and it looks it. */
+#vault-tree.searching {
+  opacity: 0.45;
+}
+
+.vtree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.vtree-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg);
+}
+
+.vtree-row.current {
+  background: rgba(61, 139, 255, 0.16);
+  color: #fff;
+}
+
+/* Not "empty": that class already means the centred empty-state message. */
+.vtree-row.no-entries .vtree-name {
+  color: var(--fg-faint);
+}
+
+.vtree-row > .i {
+  width: 14px;
+  height: 14px;
+  color: #e8c169;
+}
+
+.vtree-row.all > .i {
+  color: var(--accent);
+}
+
+.vtree-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vtree-count {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The fold arrow: pointing down when open, right when folded. */
+.vtree-fold {
+  flex: 0 0 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--fg-faint);
+}
+
+.vtree-fold:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--fg);
+}
+
+.vtree-fold .i {
+  width: 12px;
+  height: 12px;
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+
+.vtree-fold.folded .i {
+  transform: rotate(180deg);
+}
+
+/* The folder bar and its button only matter where the tree is hidden. */
+#vault-groups-btn {
+  display: none;
+}
+
+#vault-crumb {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+#vault-crumb > span:first-of-type {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#vault-crumb .i {
+  width: 14px;
+  height: 14px;
+  color: #e8c169;
+}
+
+.vcrumb-hint {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+/* ── on the phone-shaped panel the tree is a folder list ─── */
+body.portrait #vault-groups-btn {
+  display: grid;
+}
+
+body.portrait #vault-crumb[hidden] {
+  display: flex !important;
+}
+
+body.portrait #vault-tree {
+  display: none;
+}
+
+body.portrait.vault-tree-open #vault-tree {
+  display: flex;
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  padding: 4px;
+  border-right: none;
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+body.portrait.vault-tree-open .vtree-row {
+  min-height: 36px;
+  font-size: 13.5px;
+}
+
+#vault-search {
+  flex: 1 1 auto;
+  min-width: 0;
+}

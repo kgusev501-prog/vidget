@@ -509,3 +509,36 @@ test('подсказка: спрашивать о ней не значит по�
   }
   assert.equal(vault.unlocked, false, 'замок защёлкнулся, несмотря на вопросы про окно');
 });
+
+// ── the group tree ─────────────────────────────────────────────────────────
+test('группы: дерево с глубиной, родителем и числом записей', async () => {
+  const { file } = await makeDatabase();
+  const { vault } = await openVault(file);
+  const tree = vault.groups();
+  const root = tree[0];
+  const mail = tree.find((g) => g.name === 'Почта');
+  assert.equal(root.depth, 0);
+  assert.equal(root.parentId, null);
+  assert.equal(mail.depth, 1);
+  assert.equal(mail.parentId, root.id, 'родитель — корень базы');
+  assert.equal(mail.count, 2, 'в «Почте» две записи');
+  assert.equal(root.count, 2, 'прямо в корне GitHub и просроченная');
+  assert.equal(root.total, 4, 'вместе с «Почтой»; архив скрыт из поиска и не считается');
+  // «Recycle Bin», которую заводит сама библиотека, здесь обычная группа:
+  // корзиной база назначила «Корзину».
+  assert.equal(root.children, 3, 'Почта, Архив и бывшая Recycle Bin; корзины среди них нет');
+  assert.ok(!tree.some((g) => g.name === 'Корзина'));
+  vault.lock();
+});
+
+test('группы: записи группы вместе со всеми вложенными', async () => {
+  const { file } = await makeDatabase();
+  const { vault } = await openVault(file);
+  const tree = vault.groups();
+  const mail = tree.find((g) => g.name === 'Почта');
+  assert.deepEqual(vault.inGroup(mail.id).map((e) => e.title).sort(), ['Зеркало', 'Яндекс']);
+  assert.equal(vault.inGroup(tree[0].id).length, 4, 'корень показывает всё, что можно искать');
+  assert.deepEqual(vault.inGroup('нет-такой'), []);
+  assert.ok(vault.list().every((e) => e.groupId), 'у каждой записи есть группа');
+  vault.lock();
+});
