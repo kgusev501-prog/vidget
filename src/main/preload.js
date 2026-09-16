@@ -115,6 +115,7 @@ contextBridge.exposeInMainWorld('vidget', {
     pickFile: (what) => ipcRenderer.invoke('vault:pick-file', what),
     groups: () => ipcRenderer.invoke('vault:groups'),
     inGroup: (id) => ipcRenderer.invoke('vault:in-group', id),
+    createGroup: (parentId, name) => ipcRenderer.invoke('vault:create-group', { parentId, name }),
     create: (groupId, fields) => ipcRenderer.invoke('vault:create', { groupId, fields }),
     update: (id, fields) => ipcRenderer.invoke('vault:update', { id, fields }),
     remove: (id) => ipcRenderer.invoke('vault:delete', id),

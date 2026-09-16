@@ -542,3 +542,50 @@ test('группы: записи группы вместе со всеми вл�
   assert.ok(vault.list().every((e) => e.groupId), 'у каждой записи есть группа');
   vault.lock();
 });
+
+// ── creating groups ────────────────────────────────────────────────────────
+test('новая группа: появляется в дереве и переживает переоткрытие', async () => {
+  const { file } = await makeDatabase();
+  const { vault } = await openVault(file);
+  const mail = vault.groups().find((g) => g.name === 'Почта');
+
+  const top = await vault.createGroup({ name: 'Игры' });
+  assert.equal(top.ok, true);
+  const nested = await vault.createGroup({ parentId: mail.id, name: 'Рабочая почта' });
+  assert.equal(nested.ok, true);
+  vault.lock();
+
+  const again = await openVault(file);
+  const tree = again.vault.groups();
+  const games = tree.find((g) => g.name === 'Игры');
+  const work = tree.find((g) => g.name === 'Рабочая почта');
+  assert.ok(games && work, 'обе группы в файле');
+  assert.equal(games.parentId, tree[0].id, 'без родителя — в корень базы');
+  assert.equal(work.parentId, tree.find((g) => g.name === 'Почта').id, 'вложенная — внутри выбранной');
+  assert.equal(work.id, nested.id);
+  again.vault.lock();
+});
+
+test('новая группа: пустое имя и повтор рядом не принимаются', async () => {
+  const { file } = await makeDatabase();
+  const { vault } = await openVault(file);
+  assert.match((await vault.createGroup({ name: '   ' })).error, /Назовите/);
+  const dup = await vault.createGroup({ name: 'почта' });
+  assert.equal(dup.ok, false, 'регистр не делает группу другой');
+  assert.match(dup.error, /уже есть/);
+  assert.equal(vault.groups().filter((g) => g.name.toLowerCase() === 'почта').length, 1);
+  vault.lock();
+});
+
+test('новая группа: пока база открыта в KeePass, не создаётся и не остаётся в дереве', async () => {
+  const { file } = await makeDatabase();
+  const { vault } = await openVault(file);
+  fs.writeFileSync(`${file}.lock`, '');
+  const res = await vault.createGroup({ name: 'Призрак' });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /KeePass/);
+  assert.ok(!vault.groups().some((g) => g.name === 'Призрак'), 'откатилась и в памяти');
+  fs.rmSync(`${file}.lock`);
+  vault.lock();
+  assert.equal((await vault.createGroup({ name: 'После замка' })).ok, false, 'в закрытую базу не пишет');
+});

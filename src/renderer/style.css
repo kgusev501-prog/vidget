@@ -3079,3 +3079,54 @@ body.portrait.vault-tree-open .vtree-row {
 #like.armed {
   background: rgba(255, 77, 106, 0.18);
 }
+
+/* Adding a group, at the foot of the tree. */
+.vtree-add {
+  margin-top: 4px;
+  color: var(--fg-faint);
+}
+
+.vtree-plus {
+  flex: 0 0 14px;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.vtree-new {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 0 4px 0 8px;
+}
+
+.vtree-new .i {
+  width: 14px;
+  height: 14px;
+  color: #e8c169;
+}
+
+.vtree-new input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(61, 139, 255, 0.55);
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+  user-select: text;
+}
+
+.vtree-error {
+  flex: 0 0 auto;
+  padding: 2px 8px 0 28px;
+  font-size: 11px;
+  color: #ff7b7b;
+}

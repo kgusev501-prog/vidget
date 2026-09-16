@@ -2200,6 +2200,7 @@ async function refreshVaultList(keepCursor = false) {
 // phone, it becomes a list of folders opened from a bar above the entries.
 let vaultGroups = [];
 let vaultGroup = null; // chosen group id, or null for everything
+let vaultNewGroup = null; // { parentId, name, error } while a new group is being named
 const vaultFolded = new Set(); // groups whose branch is folded away
 
 async function loadVaultGroups() {
@@ -2264,6 +2265,45 @@ function renderVaultTree() {
     tree.append(row);
   }
 
+  // A new group goes inside the one chosen, or at the top when none is.
+  if (vaultNewGroup) {
+    const form = el('form', 'vtree-new');
+    const parent = vaultNewGroup.parentId && groupById(vaultNewGroup.parentId);
+    const input = el('input');
+    input.type = 'text';
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.maxLength = 100;
+    input.placeholder = parent && parent.depth > 0 ? `Новая группа в «${parent.name}»` : 'Новая группа';
+    input.value = vaultNewGroup.name || '';
+    input.addEventListener('input', () => {
+      vaultNewGroup.name = input.value;
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        vaultNewGroup = null;
+        renderVaultTree();
+      }
+    });
+    form.append(svgIcon('folder'), input);
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      saveNewGroup();
+    });
+    tree.append(form);
+    if (vaultNewGroup.error) tree.append(el('div', 'vtree-error', vaultNewGroup.error));
+    setTimeout(() => input.focus(), 0);
+  } else {
+    const add = el('button', 'vtree-row vtree-add');
+    add.dataset.newGroup = '1';
+    add.append(el('span', 'vtree-plus', '+'));
+    const chosenGroup = vaultGroup && groupById(vaultGroup);
+    add.append(el('span', 'vtree-name', chosenGroup ? `Группа в «${chosenGroup.name}»` : 'Новая группа'));
+    tree.append(add);
+  }
+
   // Searching looks through everything, whatever is chosen in the tree.
   tree.classList.toggle('searching', searching);
 
@@ -2277,12 +2317,44 @@ function renderVaultTree() {
 
 function chooseVaultGroup(id) {
   vaultGroup = id || null;
+  vaultNewGroup = null;
   document.body.classList.remove('vault-tree-open');
   if (vaultSearch.value) vaultSearch.value = '';
   refreshVaultList();
 }
 
+async function saveNewGroup() {
+  if (!vaultNewGroup) return;
+  const name = (vaultNewGroup.name || '').trim();
+  if (!name) {
+    vaultNewGroup = null;
+    renderVaultTree();
+    return;
+  }
+  const res = await api.vault.createGroup(vaultNewGroup.parentId, name);
+  if (!res || !res.ok) {
+    vaultNewGroup = { ...vaultNewGroup, error: (res && res.error) || 'Не удалось создать группу' };
+    renderVaultTree();
+    return;
+  }
+  const parentId = vaultNewGroup.parentId;
+  vaultNewGroup = null;
+  // The branch it went into is opened, so the new group is not hidden away.
+  if (parentId) vaultFolded.delete(parentId);
+  vaultGroup = res.id;
+  document.body.classList.remove('vault-tree-open');
+  await refreshVaultList();
+  toast(`Группа «${name}» создана`);
+}
+
 $('#vault-tree').addEventListener('click', (e) => {
+  if (e.target.closest('[data-new-group]')) {
+    e.stopPropagation();
+    vaultNewGroup = { parentId: vaultGroup, name: '', error: null };
+    renderVaultTree();
+    return;
+  }
+  if (e.target.closest('.vtree-new')) return;
   const fold = e.target.closest('[data-fold]');
   if (fold && fold.dataset.fold) {
     e.stopPropagation();

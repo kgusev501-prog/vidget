@@ -510,6 +510,39 @@ class Vault extends EventEmitter {
     return out;
   }
 
+  /**
+   * A new group, inside the one asked for or at the top of the database.
+   *
+   * Goes through the same write as entries do, so it is refused while KeePass
+   * has the file open and when somebody else changed it, and a failed save
+   * takes the group back out rather than leaving one only the panel can see.
+   */
+  async createGroup({ parentId, name } = {}) {
+    if (!this.db) return { ok: false, error: 'База закрыта' };
+    const title = String(name || '').trim();
+    if (!title) return { ok: false, error: 'Назовите группу' };
+    if (title.length > 100) return { ok: false, error: 'Слишком длинное название' };
+
+    const binId = this.db.meta.recycleBinUuid && this.db.meta.recycleBinUuid.id;
+    const parent = (parentId && this._groupById(parentId)) || this.db.getDefaultGroup();
+    if (!parent) return { ok: false, error: 'Некуда положить группу' };
+    if (binId && idOf(parent) === binId) return { ok: false, error: 'В корзине группы не заводят' };
+
+    // KeePass allows two groups with one name side by side, but in a tree that
+    // is read at a glance they are indistinguishable, and it is nearly always
+    // a second click on the same button.
+    const taken = (parent.groups || []).some((g) => String(g.name || '').toLowerCase() === title.toLowerCase());
+    if (taken) return { ok: false, error: `Группа «${title}» здесь уже есть` };
+
+    const group = this.db.createGroup(parent, title);
+    const res = await this._write(`новая группа «${title}»`);
+    if (!res.ok) {
+      parent.groups = (parent.groups || []).filter((g) => g !== group);
+      return res;
+    }
+    return { ok: true, id: idOf(group) };
+  }
+
   /** Entries in a group and in every group under it. */
   inGroup(groupId) {
     this.touch();
