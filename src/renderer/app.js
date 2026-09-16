@@ -23,10 +23,60 @@ const el = (tag, cls, text) => {
 let PANEL_H = 288;
 const OPEN_THRESHOLD = 70;
 
+// Which edge of the screen the strip lives on, and where on the window it and
+// the panel sit. The main process works this out; the panel only draws it.
+const layout = {
+  edge: 'top',
+  handle: { x: 0, y: 0 },
+  panelRect: { x: 0, y: 0, width: 980, height: 288 },
+  karaoke: { width: 420, height: 594 },
+  window: { width: 980, height: 356 },
+};
+const isSideEdge = () => layout.edge === 'left' || layout.edge === 'right';
+
+// How far the shade travels to open: its height when it drops from the top or
+// rises from the bottom, its width when it slides out of a side.
+const pullSpan = () => (isSideEdge() ? layout.panelRect.width : PANEL_H);
+
+/** Distance the hand has moved in the direction that opens the shade. */
+function pullDelta(dx, dy) {
+  if (layout.edge === 'bottom') return -dy;
+  if (layout.edge === 'left') return dx;
+  if (layout.edge === 'right') return -dx;
+  return dy;
+}
+
+/** Distance moved along the edge — the direction that slides the strip. */
+const alongDelta = (dx, dy) => (isSideEdge() ? dy : dx);
+
 function applyShadeSize(size) {
   if (!size || !size.shade) return;
   PANEL_H = size.shade;
-  document.documentElement.style.setProperty('--panel-h', `${size.shade}px`);
+  const root = document.documentElement.style;
+  root.setProperty('--panel-h', `${size.shade}px`);
+
+  const edgeChanged = size.edge && size.edge !== layout.edge;
+  if (size.edge) layout.edge = size.edge;
+  if (size.handle) layout.handle = size.handle;
+  if (size.panelRect) layout.panelRect = size.panelRect;
+  if (size.karaoke) layout.karaoke = size.karaoke;
+  if (size.window) layout.window = size.window;
+
+  root.setProperty('--panel-w', `${layout.panelRect.width}px`);
+  root.setProperty('--panel-x', `${layout.panelRect.x}px`);
+  root.setProperty('--panel-y', `${layout.panelRect.y}px`);
+  root.setProperty('--karaoke-w', `${layout.karaoke.width}px`);
+  root.setProperty('--karaoke-h', `${layout.karaoke.height}px`);
+
+  for (const edge of ['top', 'bottom', 'left', 'right']) {
+    document.body.classList.toggle(`edge-${edge}`, layout.edge === edge);
+  }
+  placeHandle();
+  // The words scroll differently on a side, so start them afresh there.
+  if (edgeChanged && typeof paintLyrics === 'function') {
+    words.shown = -2;
+    paintLyrics();
+  }
 }
 
 const body = document.body;
@@ -89,15 +139,17 @@ document.addEventListener('pointermove', (e) => {
   const dy = e.screenY - drag.startY;
   const dx = e.screenX - drag.startX;
 
-  // Whichever way the hand went first is what the gesture means: down pulls the
-  // shade out, sideways slides the strip along the top edge and, past the end
-  // of one monitor, onto the next.
+  // Whichever way the hand went first is what the gesture means: away from the
+  // edge pulls the shade out, along the edge slides the strip — round corners
+  // and onto other monitors too, following the cursor.
+  const pull = pullDelta(dx, dy);
+  const along = alongDelta(dx, dy);
   if (!drag.mode) {
-    if (Math.abs(dx) > AXIS_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
+    if (Math.abs(along) > AXIS_THRESHOLD && Math.abs(along) > Math.abs(pull)) {
       drag.mode = 'move';
       body.classList.add('moving');
-      api.ui.moveStart(e.screenX);
-    } else if (Math.abs(dy) > AXIS_THRESHOLD) {
+      api.ui.moveStart(e.screenX, e.screenY);
+    } else if (Math.abs(pull) > AXIS_THRESHOLD) {
       drag.mode = 'pull';
       body.classList.add('dragging');
       api.ui.prepare(); // take the mouse and let the shade slide
@@ -107,20 +159,21 @@ document.addEventListener('pointermove', (e) => {
   }
 
   if (drag.mode === 'move') {
-    api.ui.move(e.screenX);
+    api.ui.move(e.screenX, e.screenY);
     return;
   }
 
-  drag.moved = Math.max(drag.moved, Math.abs(dy));
-  const base = drag.from === 'handle' ? 0 : PANEL_H;
+  drag.moved = Math.max(drag.moved, Math.abs(pull));
+  const span = pullSpan();
+  const base = drag.from === 'handle' ? 0 : span;
   if (drag.from === 'grip') body.classList.remove('open');
-  setPull(Math.max(0, Math.min(PANEL_H, base + dy)));
+  setPull(Math.max(0, Math.min(span, base + pull)));
 });
 
 document.addEventListener('pointerup', (e) => {
   if (!drag) return;
   const { from, moved, mode } = drag;
-  const delta = e.screenY - drag.startY;
+  const delta = pullDelta(e.screenX - drag.startX, e.screenY - drag.startY);
   drag = null;
   body.classList.remove('dragging', 'moving');
 
@@ -900,7 +953,7 @@ const lyricsDock = $('#lyrics-dock');
 const lyricReel = $('#lyric-reel');
 const lyricsBtn = $('#lyrics-btn');
 
-const words = { on: false, trackId: null, lines: null, shown: -2, handleH: 0 };
+const words = { on: false, trackId: null, lines: null, shown: -2, handleH: '', mode: '' };
 
 /** Only tracks Yandex has timed words for can offer the button at all. */
 function paintLyricsButton() {
@@ -961,18 +1014,77 @@ function buildReel(lines) {
 }
 
 /**
- * Tells the main process how far down the strip now reaches.
+ * Tells the main process which part of the window the strip covers.
  *
- * Outside that rectangle the window is click-through, so without this the
- * plate would be a picture you cannot grab — the pull-down would only work on
- * the sliver of it that used to be the tab.
+ * Outside that rectangle the window is click-through, so without this a plate
+ * would be a picture you cannot grab. A long plate only takes the mouse along
+ * a band as long as the plain tab, centred on the strip: the rest of the words
+ * hang over the desktop, readable, while what is behind them still clicks.
  */
 function reportHandleHeight() {
-  const h = lyricsDock.hidden || isOpen ? 0 : Math.ceil(handle.getBoundingClientRect().height);
-  if (h === words.handleH) return;
-  words.handleH = h;
-  api.ui.handleHeight(h);
+  const box = handle.getBoundingClientRect();
+  const side = isSideEdge();
+  const BAND = 260;
+  let x = box.left;
+  let y = box.top;
+  let w = box.width;
+  let h = box.height;
+  if (!side && w > BAND) {
+    x = Math.max(box.left, Math.min(box.right - BAND, layout.handle.x - BAND / 2));
+    w = BAND;
+  } else if (side && h > BAND) {
+    y = Math.max(box.top, Math.min(box.bottom - BAND, layout.handle.y - BAND / 2));
+    h = BAND;
+  }
+  const zone = { x: Math.round(x), y: Math.round(y), width: Math.ceil(w), height: Math.ceil(h) };
+  const key = `${zone.x},${zone.y},${zone.width},${zone.height}`;
+  if (key === words.handleH) return;
+  words.handleH = key;
+  api.ui.grabZone(zone);
 }
+
+/**
+ * Sets the strip where the main process says its centre is, kept inside the
+ * window. Near a corner a wide plate cannot be centred on the strip, so it
+ * shifts inwards and the grab bar slides along it to stay under the hand.
+ */
+function placeHandle() {
+  if (!handle) return;
+  const W = layout.window.width;
+  const H = layout.window.height;
+  const w = handle.offsetWidth;
+  const h = handle.offsetHeight;
+  const clampTo = (v, max) => Math.max(0, Math.min(Math.max(0, max), v));
+  let left;
+  let top;
+  if (layout.edge === 'left' || layout.edge === 'right') {
+    left = layout.edge === 'left' ? 0 : W - w;
+    top = clampTo(layout.handle.y - h / 2, H - h);
+  } else {
+    left = clampTo(layout.handle.x - w / 2, W - w);
+    top = layout.edge === 'top' ? 0 : H - h;
+  }
+  handle.style.transform = 'none';
+  handle.style.left = `${Math.round(left)}px`;
+  handle.style.top = `${Math.round(top)}px`;
+  handle.style.setProperty('--bar-x', `${Math.round(layout.handle.x - left)}px`);
+  handle.style.setProperty('--bar-y', `${Math.round(layout.handle.y - top)}px`);
+  if (typeof words !== 'undefined') reportHandleHeight();
+}
+
+// The strip changes size on its own — hover, the words coming and going — and
+// has to be re-centred and re-reported every time it does.
+new ResizeObserver(() => placeHandle()).observe(handle);
+
+// In the karaoke column the reel is moved by where lines really start, and that
+// changes while the plate is still unfolding from the narrow tab: measured then,
+// lines wrap a word at a time and the reel flies thousands of pixels off. Measure
+// again whenever the column settles into a new size.
+new ResizeObserver(() => {
+  if (words.mode !== 'karaoke') return;
+  words.shown = -2;
+  paintLyrics();
+}).observe(lyricsDock);
 
 function paintLyrics() {
   const showing = !!(words.on && words.lines && words.lines.length);
@@ -992,7 +1104,11 @@ function paintLyrics() {
   // for somebody else's playback, which has no words here anyway.
   const pos = ownActive() ? audio.currentTime : currentPos();
   const i = api.ya.lineAt(pos);
-  if (i === words.shown) return;
+  // On a side edge the closed strip is a karaoke column: lines wrap, so the
+  // reel is moved by where a line really starts rather than by a fixed height.
+  const mode = isSideEdge() && !isOpen ? 'karaoke' : 'lines';
+  if (i === words.shown && mode === words.mode) return;
+  words.mode = mode;
 
   const rows = lyricReel.children;
   const was = rows[words.shown];
@@ -1001,7 +1117,15 @@ function paintLyrics() {
 
   // -1 is the intro: the reel drops by one so the top slot is empty and the
   // first line waits below, which is exactly what a singer wants to see.
-  lyricReel.style.transform = `translateY(calc(var(--lyric-h) * ${-i}))`;
+  if (mode === 'karaoke') {
+    // One sung line stays in view above the current one, the rest of the song
+    // runs on below it.
+    const anchor = rows[Math.max(0, i - 1)];
+    const offset = anchor && rows[0] ? anchor.offsetTop - rows[0].offsetTop : 0;
+    lyricReel.style.transform = `translateY(${-offset}px)`;
+  } else {
+    lyricReel.style.transform = `translateY(calc(var(--lyric-h) * ${-i}))`;
+  }
 
   for (let n = 0; n < rows.length; n++) rows[n].classList.toggle('is-past', n < i);
   if (rows[i]) rows[i].classList.add('is-now');

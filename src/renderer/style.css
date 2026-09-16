@@ -138,7 +138,7 @@ body.moving #handle .pill {
   background: var(--bg);
   border: 1px solid var(--line);
   border-top: none;
-  border-radius: 0 0 var(--radius) var(--radius);
+  border-radius: var(--shade-corners);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -825,7 +825,7 @@ body.seeking #seek-knob {
   position: absolute;
   inset: 0;
   background: var(--bg);
-  border-radius: 0 0 var(--radius) var(--radius);
+  border-radius: var(--shade-corners);
   display: flex;
   flex-direction: column;
   z-index: 26;
@@ -974,7 +974,7 @@ body.seeking #seek-knob {
   position: absolute;
   inset: 0;
   background: var(--bg);
-  border-radius: 0 0 var(--radius) var(--radius);
+  border-radius: var(--shade-corners);
   display: flex;
   flex-direction: column;
   z-index: 27;
@@ -1589,7 +1589,7 @@ body.moving.has-lyrics:not(.open) #handle .pill {
   position: absolute;
   inset: 0;
   background: var(--bg);
-  border-radius: 0 0 var(--radius) var(--radius);
+  border-radius: var(--shade-corners);
   display: flex;
   flex-direction: column;
   z-index: 28;
@@ -1887,7 +1887,7 @@ body.moving.has-lyrics:not(.open) #handle .pill {
   position: absolute;
   inset: 0;
   background: var(--bg);
-  border-radius: 0 0 var(--radius) var(--radius);
+  border-radius: var(--shade-corners);
   display: flex;
   flex-direction: column;
   z-index: 27;
@@ -2061,7 +2061,7 @@ body.moving.has-lyrics:not(.open) #handle .pill {
   position: absolute;
   inset: 0;
   background: var(--bg);
-  border-radius: 0 0 var(--radius) var(--radius);
+  border-radius: var(--shade-corners);
   display: flex;
   flex-direction: column;
   z-index: 29;
@@ -2159,4 +2159,321 @@ body.vault-hint #handle .pill {
 
 body.vault-hint #handle .pill i {
   background: var(--accent);
+}
+
+/* ════════════════════════════════════════════════════════════
+   The strip on any edge of the screen
+   The main process says which edge; everything that points "down from the
+   top" has a counterpart for the bottom and for either side. The top edge is
+   what the rules above already describe.
+   ════════════════════════════════════════════════════════════ */
+:root {
+  --panel-w: 980px;
+  --panel-x: 0px;
+  --panel-y: 0px;
+  --karaoke-w: 420px;
+  --karaoke-h: 594px;
+  /* The panel is rounded on the corners away from the screen edge. */
+  --shade-corners: 0 0 var(--radius) var(--radius);
+}
+
+body.edge-bottom {
+  --shade-corners: var(--radius) var(--radius) 0 0;
+}
+
+body.edge-left {
+  --shade-corners: 0 var(--radius) var(--radius) 0;
+}
+
+body.edge-right {
+  --shade-corners: var(--radius) 0 0 var(--radius);
+}
+
+/* ── the small tab ───────────────────────────────────────── */
+body.edge-bottom #handle {
+  place-items: end center;
+}
+
+body.edge-bottom #handle .pill {
+  border-radius: 14px 14px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: none;
+}
+
+body.edge-left #handle,
+body.edge-right #handle {
+  width: 32px;
+  height: 260px;
+}
+
+body.edge-left #handle {
+  place-items: center start;
+}
+
+body.edge-right #handle {
+  place-items: center end;
+}
+
+body.edge-left #handle .pill,
+body.edge-right #handle .pill {
+  width: 22px;
+  height: 190px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+body.edge-left #handle .pill {
+  border-radius: 0 14px 14px 0;
+  border-left: none;
+}
+
+body.edge-right #handle .pill {
+  border-radius: 14px 0 0 14px;
+  border-right: none;
+}
+
+body.edge-left #handle .pill i,
+body.edge-right #handle .pill i {
+  width: 3px;
+  height: 54px;
+}
+
+body.hover.edge-left #handle .pill,
+body.hover.edge-right #handle .pill {
+  width: 27px;
+  height: 236px;
+}
+
+/* ── the shade ───────────────────────────────────────────── */
+body.edge-bottom #panel {
+  top: auto;
+  bottom: 0;
+  transform: translateY(calc(100% - var(--pull)));
+  border-top: 1px solid var(--line);
+  border-bottom: none;
+}
+
+body.edge-left #panel,
+body.edge-right #panel {
+  top: var(--panel-y);
+  width: var(--panel-w);
+  border: 1px solid var(--line);
+}
+
+body.edge-left #panel {
+  left: 0;
+  transform: translateX(calc(-100% + var(--pull)));
+  border-left: none;
+  padding-right: 14px;
+}
+
+body.edge-right #panel {
+  left: auto;
+  right: 0;
+  transform: translateX(calc(100% - var(--pull)));
+  border-right: none;
+  padding-left: 14px;
+}
+
+body.open.edge-bottom #panel,
+body.open.edge-left #panel,
+body.open.edge-right #panel {
+  transform: none;
+}
+
+body.edge-bottom #panel,
+body.edge-left #panel,
+body.edge-right #panel {
+  border-radius: var(--shade-corners);
+}
+
+/* The grab bar always sits on the panel's edge away from the screen edge. */
+body.edge-bottom #grip {
+  order: 99;
+  padding-top: 0;
+  padding-bottom: 6px;
+}
+
+body.edge-left #grip,
+body.edge-right #grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  height: auto;
+  padding: 0;
+  z-index: 2;
+}
+
+body.edge-left #grip {
+  right: 0;
+}
+
+body.edge-right #grip {
+  left: 0;
+}
+
+body.edge-left #grip span,
+body.edge-right #grip span {
+  width: 4px;
+  height: 64px;
+}
+
+body.edge-left #grip:hover span,
+body.edge-right #grip:hover span {
+  width: 4px;
+  height: 84px;
+}
+
+body.edge-bottom.open #panel,
+body.edge-bottom.dragging #panel,
+body.edge-bottom.animating #panel {
+  box-shadow: 0 -14px 30px rgba(0, 0, 0, 0.5);
+}
+
+/* Messages sit on the far side of the panel from the edge, or inside it on a
+   side where there is no room past its end. */
+body.edge-bottom #toast {
+  top: auto;
+  bottom: calc(var(--panel-h) + 14px);
+}
+
+body.edge-left #toast,
+body.edge-right #toast {
+  top: calc(var(--panel-y) + var(--panel-h) - 46px);
+}
+
+body.edge-left #toast {
+  left: calc(var(--panel-w) / 2);
+}
+
+body.edge-right #toast {
+  left: auto;
+  right: calc(var(--panel-w) / 2);
+  transform: translate(50%, -8px);
+}
+
+body.edge-right #toast.show {
+  transform: translate(50%, 0);
+}
+
+/* ── the plate with the words, at the bottom ─────────────── */
+body.edge-bottom.has-lyrics:not(.open) #handle .pill {
+  border-radius: 18px 18px 0 0;
+  padding: 6px 0 9px;
+}
+
+body.edge-bottom.has-lyrics:not(.open) #handle .pill i {
+  order: -1;
+  margin: 0 0 7px;
+}
+
+/* Near a corner the plate cannot be centred on the strip; the bar follows the
+   hand along it instead. */
+body.has-lyrics:not(.open):not(.edge-left):not(.edge-right) #handle .pill i {
+  align-self: flex-start;
+  margin-left: calc(var(--bar-x, 50%) - 27px);
+}
+
+body.hover.has-lyrics:not(.open):not(.edge-left):not(.edge-right) #handle .pill i,
+body.moving.has-lyrics:not(.open):not(.edge-left):not(.edge-right) #handle .pill i {
+  margin-left: calc(var(--bar-x, 50%) - 36px);
+}
+
+/* ── the karaoke column on a side ────────────────────────── */
+/* A side has height to spare, so the words become a portrait plate: one sung
+   line kept above, the one being sung, and as much of what comes next as fits. */
+body.edge-left.has-lyrics:not(.open) #handle,
+body.edge-right.has-lyrics:not(.open) #handle {
+  width: var(--karaoke-w);
+  height: var(--karaoke-h);
+}
+
+body.edge-left.has-lyrics:not(.open) #handle .pill,
+body.edge-right.has-lyrics:not(.open) #handle .pill {
+  flex-direction: row;
+  align-items: stretch;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+}
+
+body.edge-left.has-lyrics:not(.open) #handle .pill {
+  border-radius: 0 20px 20px 0;
+}
+
+body.edge-right.has-lyrics:not(.open) #handle .pill {
+  border-radius: 20px 0 0 20px;
+}
+
+body.edge-left.has-lyrics:not(.open) #handle .pill i,
+body.edge-right.has-lyrics:not(.open) #handle .pill i {
+  flex: 0 0 auto;
+  width: 3px;
+  height: 54px;
+  margin: 0 8px;
+  align-self: flex-start;
+  margin-top: calc(var(--bar-y, 50%) - 27px);
+  order: 2;
+}
+
+body.edge-right.has-lyrics:not(.open) #handle .pill i {
+  order: -1;
+}
+
+body.hover.edge-left.has-lyrics:not(.open) #handle .pill i,
+body.hover.edge-right.has-lyrics:not(.open) #handle .pill i,
+body.moving.edge-left.has-lyrics:not(.open) #handle .pill i,
+body.moving.edge-right.has-lyrics:not(.open) #handle .pill i {
+  width: 3px;
+  height: 72px;
+  margin-top: calc(var(--bar-y, 50%) - 36px);
+}
+
+body.edge-left.has-lyrics:not(.open) #lyrics-dock,
+body.edge-right.has-lyrics:not(.open) #lyrics-dock {
+  flex: 1 1 auto;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  /* Margin, not padding: the reel is clipped at the padding edge, so padding
+     would let the tail of a sung line show above the first one. */
+  margin: 22px 0;
+  padding: 0;
+  overflow: hidden;
+  align-self: stretch;
+  animation-name: karaoke-in;
+}
+
+@keyframes karaoke-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+body.edge-left.has-lyrics:not(.open) #lyrics-dock .lyric,
+body.edge-right.has-lyrics:not(.open) #lyrics-dock .lyric {
+  height: auto;
+  line-height: 1.38;
+  padding: 7px 22px;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  text-align: left;
+  font-size: 16px;
+}
+
+body.edge-left.has-lyrics:not(.open) #lyrics-dock .lyric.is-now,
+body.edge-right.has-lyrics:not(.open) #lyrics-dock .lyric.is-now {
+  font-size: 19px;
+  font-weight: 650;
+}
+
+/* The one sung line kept above is a reminder, not a line to read again. */
+body.edge-left.has-lyrics:not(.open) #lyrics-dock .lyric.is-past,
+body.edge-right.has-lyrics:not(.open) #lyrics-dock .lyric.is-past {
+  opacity: 0.4;
 }

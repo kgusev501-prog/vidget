@@ -59,16 +59,9 @@ const { Vault } = require('./vault');
 const { generate: generatePassword } = require('../shared/password');
 const { AutoType } = require('./autotype');
 const { startServer } = require('./server');
-const { panelSize: measurePanel, slotX, slotFraction } = require('../shared/panel-size');
+const dock = require('../shared/dock');
 const updater = require('./updater');
 const youtube = require('./youtube');
-
-// --- geometry ---------------------------------------------------------------
-// The window never changes size: resizing a transparent window on Windows
-// leaves the newly exposed area unpainted. It always spans the full panel and
-// stays click-through, except over the handle or while the shade is open.
-const HANDLE_W = 260;
-const HANDLE_H = 30;
 
 // One identity for the app everywhere: the taskbar grouping, the autostart
 // entry, and the media session the widget publishes when it plays something
@@ -124,15 +117,10 @@ function pollCursor() {
 
 // --- window -----------------------------------------------------------------
 // The widget is not nailed to the middle of the main monitor. The strip can be
-// dragged along the top edge and across onto another display, and where it was
-// left is remembered between runs.
+// dragged along any edge of any display, round the corners, and where it was
+// left is remembered between runs. All the arithmetic lives in shared/dock.
 function placement() {
-  const saved = (settings && settings.get().placement) || {};
-  const x = Number(saved.x);
-  return {
-    display: saved.display == null ? null : Number(saved.display),
-    x: Number.isFinite(x) ? Math.max(0, Math.min(1, x)) : 0.5,
-  };
+  return dock.normalizePlacement(settings && settings.get().placement);
 }
 
 /** The display the widget lives on — the remembered one while it still exists. */
@@ -145,68 +133,76 @@ function homeDisplay() {
   return screen.getPrimaryDisplay();
 }
 
-/** Panel size for the display the widget lives on. */
-function panelSize() {
-  return measurePanel(homeDisplay().workArea);
+/** Window, strip and panel for where the widget is now. */
+function currentLayout() {
+  return dock.dockLayout(homeDisplay().workArea, placement());
 }
 
 function targetBounds() {
-  const area = homeDisplay().workArea;
-  const size = measurePanel(area);
+  return currentLayout().bounds;
+}
+
+/** What the panel needs to draw itself for this place on the screen. */
+function layoutForRenderer() {
+  const l = currentLayout();
   return {
-    x: slotX(area, size.width, placement().x),
-    y: area.y,
-    width: size.width,
-    height: size.height,
+    ...l.size,
+    edge: l.edge,
+    handle: l.handle,
+    panelRect: l.panel,
+    karaoke: l.karaoke,
+    window: { width: l.bounds.width, height: l.bounds.height },
   };
 }
 
 // --- moving the strip -------------------------------------------------------
 // The window is deliberately not `movable`: Windows would let the user drag it
-// anywhere, including off the top edge where the shade could not open. Instead
-// the handle drag is turned into a slide along the top edge of whichever
-// monitor the strip is over.
+// anywhere, including to places where the shade could not open. Instead the
+// drag is turned into a slide along whichever edge the cursor is nearest to,
+// on whichever monitor it is over.
 let moveGrab = null;
 
-function beginMove(screenX) {
-  if (!win || win.isDestroyed()) return;
-  moveGrab = screenX - win.getBounds().x;
+function beginMove(point) {
+  if (!win || win.isDestroyed() || !point) return;
+  const l = currentLayout();
+  const centre = dock.isSide(l.edge) ? l.bounds.y + l.handle.y : l.bounds.x + l.handle.x;
+  // Where on the strip the hand took hold, so it does not jump to centre under
+  // the cursor. Only meaningful while the strip stays on the same edge.
+  moveGrab = { edge: l.edge, offset: (dock.isSide(l.edge) ? point.y : point.x) - centre };
 }
 
-function moveTo(screenX) {
-  if (moveGrab == null || !win || win.isDestroyed()) return;
-  const wanted = screenX - moveGrab;
-  const b = win.getBounds();
-
-  // Whichever monitor the middle of the strip is over is the one it lands on.
-  const display = screen.getDisplayNearestPoint({
-    x: Math.round(wanted + b.width / 2),
-    y: b.y + Math.round(HANDLE_H / 2),
-  });
+function moveTo(point) {
+  if (!moveGrab || !win || win.isDestroyed() || !point) return;
+  const display = screen.getDisplayNearestPoint({ x: Math.round(point.x), y: Math.round(point.y) });
   const area = display.workArea;
-  const size = measurePanel(area);
-  const share = slotFraction(area, size.width, wanted);
-  const x = slotX(area, size.width, share);
+  const edge = dock.nearestEdge(area, point);
+  // Round a corner once and the old grip point stops meaning anything.
+  if (edge !== moveGrab.edge) moveGrab = { edge, offset: 0 };
+  const next = { display: display.id, ...dock.placeAt(area, point, moveGrab.offset) };
 
-  // Resizing a transparent window leaves the newly exposed area unpainted, so
-  // the size is only ever touched when the strip actually changes monitor.
-  if (size.width !== b.width || size.height !== b.height) {
-    win.setBounds({ x, y: area.y, width: size.width, height: size.height });
-    sendShadeSize();
-  } else {
-    win.setPosition(x, area.y);
-  }
-
+  const before = currentLayout();
   const s = settings.get();
-  s.placement = { display: display.id, x: share };
+  s.placement = next;
   settings.set(s);
+  const after = currentLayout();
+
+  const b = win.getBounds();
+  const moved = after.bounds.x !== b.x || after.bounds.y !== b.y;
+  const resized = after.bounds.width !== b.width || after.bounds.height !== b.height;
+  // Resizing a transparent window leaves the newly exposed area unpainted, so
+  // the size is only touched when the strip changes edge or monitor.
+  if (resized) win.setBounds(after.bounds);
+  else if (moved) win.setPosition(after.bounds.x, after.bounds.y);
+  if (after.edge !== before.edge) grabZone = null;
+  sendShadeSize();
 }
 
-/** Back to where it started: the middle of the main monitor. */
+/** Back to where it started: the middle of the top of the main monitor. */
 function centerPanel() {
   const s = settings.get();
-  s.placement = { display: screen.getPrimaryDisplay().id, x: 0.5 };
+  s.placement = { display: screen.getPrimaryDisplay().id, edge: 'top', along: 0.5 };
   settings.set(s);
+  grabZone = null;
   reposition();
 }
 
@@ -215,21 +211,32 @@ function hasOwnChildWindow() {
   return BrowserWindow.getAllWindows().some((w) => w !== win && !w.isDestroyed() && w.isVisible());
 }
 
-/** The strip the closed shade actually responds to, in screen coordinates. */
-// With the words showing, the strip grows downward into a plate. The panel
-// measures itself and says how tall it now is; the width deliberately stays as
-// it was, so the long ends of a line hang over the desktop without taking the
-// mouse — the words can be read and what is behind them still clicked.
-let handleH = HANDLE_H;
+// The part of the window the closed shade responds to. The panel measures its
+// strip — a small tab, the plate with the words, the karaoke column on a side —
+// and reports it relative to the window; until it has, the default zone at the
+// edge stands in.
+let grabZone = null;
 
+function setGrabZone(rect) {
+  if (!rect || !win || win.isDestroyed()) {
+    grabZone = null;
+    return;
+  }
+  const b = win.getBounds();
+  const num = (v) => Math.round(Number(v) || 0);
+  const x = Math.max(0, Math.min(b.width, num(rect.x)));
+  const y = Math.max(0, Math.min(b.height, num(rect.y)));
+  // Never the whole window: a zone that big would stop the desktop taking clicks.
+  const width = Math.max(0, Math.min(b.width - x, 700, num(rect.width)));
+  const height = Math.max(0, Math.min(b.height - y, 700, num(rect.height)));
+  grabZone = width && height ? { x, y, width, height } : null;
+}
+
+/** The strip the closed shade actually responds to, in screen coordinates. */
 function handleRect() {
   const b = win.getBounds();
-  return {
-    x: b.x + Math.round((b.width - HANDLE_W) / 2),
-    y: b.y,
-    width: HANDLE_W,
-    height: handleH,
-  };
+  if (grabZone) return { x: b.x + grabZone.x, y: b.y + grabZone.y, width: grabZone.width, height: grabZone.height };
+  return dock.defaultGrab({ ...currentLayout(), bounds: b });
 }
 
 function createWindow() {
@@ -364,6 +371,7 @@ function toggle() {
 
 function reposition() {
   if (!win || win.isDestroyed()) return;
+  grabZone = null;
   win.setBounds(targetBounds());
   sendShadeSize();
 }
@@ -371,7 +379,7 @@ function reposition() {
 /** The panel draws itself; it needs to know how tall the shade may be. */
 function sendShadeSize() {
   if (!win || win.isDestroyed()) return;
-  win.webContents.send('ui:size', panelSize());
+  win.webContents.send('ui:size', layoutForRenderer());
 }
 
 // --- tray -------------------------------------------------------------------
@@ -718,7 +726,7 @@ function send(channel, payload) {
 
 // --- ipc --------------------------------------------------------------------
 function registerIpc() {
-  ipcMain.handle('ui:size', () => panelSize());
+  ipcMain.handle('ui:size', () => layoutForRenderer());
   ipcMain.on('ui:prepare', () => prepare());
   ipcMain.on('ui:expand', () => expand());
   ipcMain.on('ui:request-close', () => collapse());
@@ -727,16 +735,14 @@ function registerIpc() {
   ipcMain.on('ui:release', () => {
     if (!expanded) finishCollapse();
   });
-  ipcMain.on('ui:move-start', (_e, screenX) => beginMove(screenX));
-  ipcMain.on('ui:move', (_e, screenX) => moveTo(screenX));
+  ipcMain.on('ui:move-start', (_e, point) => beginMove(point));
+  ipcMain.on('ui:move', (_e, point) => moveTo(point));
   ipcMain.on('ui:move-end', () => {
     moveGrab = null;
   });
-  // How tall the strip has become; only its own height, never anything wilder.
-  ipcMain.on('ui:handle-height', (_e, h) => {
-    const wanted = Math.round(Number(h) || 0);
-    handleH = Math.max(HANDLE_H, Math.min(160, wanted || HANDLE_H));
-  });
+  // The strip as the panel has drawn it, relative to the window; clamped, so it
+  // can never swallow the whole window.
+  ipcMain.on('ui:grab-zone', (_e, rect) => setGrabZone(rect));
 
   ipcMain.on('ui:center', () => centerPanel());
 

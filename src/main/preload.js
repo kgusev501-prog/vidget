@@ -26,13 +26,13 @@ contextBridge.exposeInMainWorld('vidget', {
     requestClose: () => ipcRenderer.send('ui:request-close'),
     grab: () => ipcRenderer.send('ui:grab'),
     release: () => ipcRenderer.send('ui:release'),
-    moveStart: (screenX) => ipcRenderer.send('ui:move-start', screenX),
-    move: (screenX) => ipcRenderer.send('ui:move', screenX),
+    moveStart: (x, y) => ipcRenderer.send('ui:move-start', { x, y }),
+    move: (x, y) => ipcRenderer.send('ui:move', { x, y }),
     moveEnd: () => ipcRenderer.send('ui:move-end'),
     center: () => ipcRenderer.send('ui:center'),
-    // How tall the strip has grown, so the main process knows how much of the
-    // window stops being click-through.
-    handleHeight: (h) => ipcRenderer.send('ui:handle-height', h),
+    // Where the strip is drawn, relative to the window, so the main process knows
+    // which part of it stops being click-through.
+    grabZone: (rect) => ipcRenderer.send('ui:grab-zone', rect),
     onOpen: on('ui:open'),
     onClose: on('ui:close'),
   },
