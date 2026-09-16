@@ -47,6 +47,9 @@ test('бока: окно у края, панель на высоте челки,
       assert.equal(edge === 'left' ? l.bounds.x : l.bounds.x + l.bounds.width, edge === 'left' ? 0 : 1920);
       assert.ok(l.panel.y >= 0 && l.panel.y + l.panel.height <= l.bounds.height, 'панель в окне');
       assert.ok(l.bounds.height >= l.karaoke.height, 'плита караоке помещается в окно');
+      assert.equal(l.panel.width, dock.KARAOKE_W, 'сбоку панель узкая, как экран телефона');
+      assert.equal(l.panel.height, l.karaoke.height, 'и той же высоты, что плита караоке');
+      assert.ok(l.bounds.width < 600, 'окно не шире, чем нужно телефону и его тени');
       const centre = l.bounds.y + l.handle.y;
       if (along === 0) assert.equal(centre, dock.HANDLE_LEN / 2);
       if (along === 1) assert.equal(centre, 1040 - dock.HANDLE_LEN / 2);

@@ -53,7 +53,6 @@ function applyShadeSize(size) {
   if (!size || !size.shade) return;
   PANEL_H = size.shade;
   const root = document.documentElement.style;
-  root.setProperty('--panel-h', `${size.shade}px`);
 
   const edgeChanged = size.edge && size.edge !== layout.edge;
   if (size.edge) layout.edge = size.edge;
@@ -62,6 +61,12 @@ function applyShadeSize(size) {
   if (size.karaoke) layout.karaoke = size.karaoke;
   if (size.window) layout.window = size.window;
 
+  // On a side the panel is a phone-sized screen of its own height; on the top
+  // and bottom it is the shade, as tall as the display allows.
+  const portrait = isSideEdge();
+  if (portrait) PANEL_H = layout.panelRect.height;
+  root.setProperty('--panel-h', `${PANEL_H}px`);
+  document.body.classList.toggle('portrait', portrait);
   root.setProperty('--panel-w', `${layout.panelRect.width}px`);
   root.setProperty('--panel-x', `${layout.panelRect.x}px`);
   root.setProperty('--panel-y', `${layout.panelRect.y}px`);
@@ -1059,7 +1064,10 @@ function placeHandle() {
   let top;
   if (layout.edge === 'left' || layout.edge === 'right') {
     left = layout.edge === 'left' ? 0 : W - w;
-    top = clampTo(layout.handle.y - h / 2, H - h);
+    // A tall plate keeps the same margin as the phone panel, so its corners
+    // and shadow do not run into the end of the window.
+    const m = Math.max(0, Math.min(24, (H - h) / 2));
+    top = m + clampTo(layout.handle.y - h / 2 - m, H - h - 2 * m);
   } else {
     left = clampTo(layout.handle.x - w / 2, W - w);
     top = layout.edge === 'top' ? 0 : H - h;
@@ -1570,6 +1578,7 @@ clipStrip.addEventListener('click', async (e) => {
 
 clipStrip.addEventListener('wheel', (e) => {
   if (e.deltaY === 0) return;
+  if (body.classList.contains('portrait')) return; // a column scrolls by itself
   clipStrip.scrollLeft += e.deltaY;
   e.preventDefault();
 }, { passive: false });
@@ -1703,6 +1712,7 @@ noteStrip.addEventListener('click', (e) => {
 
 noteStrip.addEventListener('wheel', (e) => {
   if (e.deltaY === 0) return;
+  if (body.classList.contains('portrait')) return;
   noteStrip.scrollLeft += e.deltaY;
   e.preventDefault();
 }, { passive: false });
@@ -1854,6 +1864,7 @@ ytStrip.addEventListener(
   'wheel',
   (e) => {
     if (!e.deltaY) return;
+    if (body.classList.contains('portrait')) return;
     ytStrip.scrollLeft += e.deltaY;
     e.preventDefault();
   },
@@ -2833,7 +2844,7 @@ async function maybeWelcome() {
   const hotkey = s.hotkey || 'Control+Alt+Space';
   $('#wel-hotkey').textContent =
     `Открыть панель можно и с клавиатуры: ${HOTKEY_NAMES[hotkey] || hotkey}. ` +
-    'Полоску можно потянуть вбок — панель переедет туда, где удобнее, хоть на соседний монитор. ' +
+    'Полоску можно вести вдоль любого края экрана, через углы и на соседний монитор — панель откроется там, где удобнее. ' +
     'Значок в трее держит те же настройки и выход.';
   welcomePane.hidden = false;
   api.ui.expand();

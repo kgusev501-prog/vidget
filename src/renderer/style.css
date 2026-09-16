@@ -2477,3 +2477,281 @@ body.edge-left.has-lyrics:not(.open) #lyrics-dock .lyric.is-past,
 body.edge-right.has-lyrics:not(.open) #lyrics-dock .lyric.is-past {
   opacity: 0.4;
 }
+
+/* ════════════════════════════════════════════════════════════
+   Portrait: the panel on a side edge, laid out like a phone
+   The same footprint as the karaoke plate. Tabs move to the bottom as a
+   tab bar under the thumb, everything that was a horizontal strip becomes a
+   column that scrolls, and the player stacks around a big cover.
+   ════════════════════════════════════════════════════════════ */
+body.portrait #panel {
+  border-radius: 22px;
+}
+
+body.portrait.edge-left #panel {
+  border-radius: 0 22px 22px 0;
+}
+
+body.portrait.edge-right #panel {
+  border-radius: 22px 0 0 22px;
+}
+
+body.portrait {
+  --shade-corners: 0;
+}
+
+/* ── tab bar at the bottom ───────────────────────────────── */
+body.portrait #views {
+  order: 1;
+}
+
+body.portrait #tabs {
+  order: 2;
+  gap: 0;
+  padding: 0 6px 4px;
+  border-bottom: none;
+  border-top: 1px solid var(--line);
+}
+
+body.portrait .tab {
+  flex-direction: column;
+  gap: 3px;
+  height: 54px;
+  font-size: 10px;
+  font-weight: 500;
+  border-bottom: none;
+  border-top: 2px solid transparent;
+  padding: 0 2px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+body.portrait .tab.is-active {
+  border-top-color: var(--accent);
+}
+
+body.portrait .tab .i {
+  width: 19px;
+  height: 19px;
+}
+
+/* The long label does not fit under an icon; the icon says it well enough. */
+body.portrait .tab[data-tab="clip"] {
+  font-size: 0;
+  /* The emptied label still counts as an item, and would add a second gap. */
+  gap: 0;
+}
+
+body.portrait .tab[data-tab="clip"] .i {
+  margin-bottom: 3px;
+}
+
+body.portrait .tab[data-tab="clip"]::after {
+  content: "Буфер";
+  font-size: 10px;
+}
+
+body.portrait #menu-btn {
+  align-self: center;
+}
+
+body.portrait #menu {
+  top: auto;
+  bottom: 62px;
+  right: 10px;
+}
+
+body.portrait .view {
+  padding: 12px 12px 10px;
+}
+
+/* Messages float above the tab bar. */
+body.portrait.edge-left #toast,
+body.portrait.edge-right #toast {
+  top: calc(var(--panel-y) + var(--panel-h) - 96px);
+}
+
+/* ── music: a player stacked round a big cover ───────────── */
+body.portrait .player {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "art art"
+    "text text"
+    "controls controls"
+    "reactions vol"
+    "open open";
+  align-content: center;
+  justify-items: center;
+  row-gap: 12px;
+  column-gap: 8px;
+  padding: 14px 16px;
+}
+
+body.portrait #art {
+  grid-area: art;
+  width: auto;
+  height: min(168px, 32vh);
+  aspect-ratio: 1;
+  border-radius: 14px;
+  font-size: 54px;
+}
+
+body.portrait #np-text {
+  grid-area: text;
+  width: 100%;
+  text-align: center;
+}
+
+body.portrait #np-text .scroller {
+  mask-image: none;
+}
+
+body.portrait #np-title > span,
+body.portrait #np-artist > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+body.portrait #controls {
+  grid-area: controls;
+  gap: 18px;
+}
+
+body.portrait #reactions {
+  grid-area: reactions;
+  justify-self: start;
+}
+
+body.portrait #vol {
+  grid-area: vol;
+  width: 150px;
+  justify-self: end;
+}
+
+body.portrait #open-player {
+  grid-area: open;
+}
+
+body.portrait #lyrics {
+  width: 100%;
+}
+
+/* ── lists that used to run sideways ─────────────────────── */
+body.portrait .strip {
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 4px 6px 0;
+  gap: 8px;
+}
+
+body.portrait .strip::-webkit-scrollbar {
+  width: 6px;
+  height: 0;
+}
+
+body.portrait .chip {
+  width: 100%;
+  flex: 0 0 auto;
+  min-height: 84px;
+  max-height: 160px;
+}
+
+body.portrait .chip .txt {
+  max-height: 88px;
+}
+
+body.portrait .chip .shot {
+  flex: 0 0 auto;
+  height: 132px;
+}
+
+body.portrait .chip .swatch {
+  flex: 0 0 auto;
+  height: 54px;
+}
+
+/* A hover row cannot be reached by a thumb that never hovers, and a wide card
+   has room for it anyway. */
+body.portrait .chip .acts {
+  display: flex;
+}
+
+body.portrait .chip.note {
+  width: 100%;
+}
+
+body.portrait .view[data-view="notes"] .toolbar {
+  flex-direction: column;
+}
+
+body.portrait #note-search {
+  flex: 0 0 auto;
+}
+
+body.portrait #note-quick::placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── youtube: the player on top, results below it ────────── */
+body.portrait #yt-row {
+  flex-direction: column;
+}
+
+body.portrait #yt-player {
+  width: 100%;
+  flex-direction: column;
+}
+
+body.portrait #yt-frame {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+
+body.portrait .chip.video {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-height: 0;
+  padding: 8px;
+}
+
+body.portrait .chip.video .cover {
+  width: 132px;
+  height: 74px;
+}
+
+body.portrait .chip.video .vtitle {
+  margin-top: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ── overlays and forms that assumed a wide panel ────────── */
+body.portrait .set-row {
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+body.portrait .set-row input[type='url'] {
+  flex: 1 1 100%;
+}
+
+body.portrait .ya-row {
+  flex-wrap: wrap;
+}
+
+body.portrait .vfield .vname {
+  flex-basis: 96px;
+}
+
+body.portrait .vf-name {
+  flex-basis: 76px;
+}

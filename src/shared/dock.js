@@ -26,9 +26,10 @@ const HANDLE_DEPTH = 30;
 // Room beside the panel for its shadow to fade out.
 const SHADOW_ROOM = 68;
 
-// On a side edge the words become a portrait plate: wide enough for a line to
-// fit, and as tall as the top plate is wide — that height is what makes it a
-// karaoke rather than two lines of subtitles.
+// On a side edge everything turns portrait. The words become a karaoke plate —
+// wide enough for a line to fit, as tall as the top plate is wide — and the
+// panel opens in the same footprint, laid out like a phone screen: a panel as
+// wide as a monitor sliding out of its side would cover half the desk.
 const KARAOKE_W = 420;
 const KARAOKE_H = 594;
 const KARAOKE_MARGIN = 24;
@@ -102,11 +103,8 @@ function dockLayout(area, placement) {
       height,
     };
   } else {
-    const width = Math.min(area.width, size.width + SHADOW_ROOM);
-    const height = Math.min(
-      area.height,
-      Math.max(size.shade + SHADOW_ROOM, karaokeHeight(area) + KARAOKE_MARGIN * 2)
-    );
+    const width = Math.min(area.width, KARAOKE_W + SHADOW_ROOM);
+    const height = Math.min(area.height, karaokeHeight(area) + KARAOKE_MARGIN * 2);
     bounds = {
       x: edge === 'left' ? area.x : right - width,
       y: Math.round(clamp(centre - height / 2, area.y, bottom - height)),
@@ -126,12 +124,16 @@ function dockLayout(area, placement) {
     panel = { x: 0, y: bounds.height - size.shade, width: size.width, height: size.shade };
   } else {
     handle = { x: edge === 'left' ? 0 : bounds.width, y: centre - bounds.y };
-    const top = Math.round(clamp(handle.y - size.shade / 2, 0, bounds.height - size.shade));
+    const phone = { width: Math.min(KARAOKE_W, bounds.width), height: karaokeHeight(area) };
+    // Kept off the window's top and bottom so the rounded corners and the
+    // shadow survive when the strip sits right at the end of the edge.
+    const margin = Math.max(0, Math.min(KARAOKE_MARGIN, (bounds.height - phone.height) / 2));
+    const top = Math.round(clamp(handle.y - phone.height / 2, margin, bounds.height - phone.height - margin));
     panel = {
-      x: edge === 'left' ? 0 : bounds.width - size.width,
+      x: edge === 'left' ? 0 : bounds.width - phone.width,
       y: Math.max(0, top),
-      width: size.width,
-      height: size.shade,
+      width: phone.width,
+      height: phone.height,
     };
   }
 
