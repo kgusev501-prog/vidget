@@ -2201,6 +2201,7 @@ async function refreshVaultList(keepCursor = false) {
 let vaultGroups = [];
 let vaultGroup = null; // chosen group id, or null for everything
 let vaultNewGroup = null; // { parentId, name, error } while a new group is being named
+let vaultRenaming = null; // { id, name, error } while a group is being renamed
 const vaultFolded = new Set(); // groups whose branch is folded away
 
 async function loadVaultGroups() {
@@ -2250,6 +2251,45 @@ function renderVaultTree() {
     if (group.id === rootId) continue;
     if (!groupVisible(group)) continue;
     const depth = rootId ? group.depth - 1 : group.depth;
+
+    // Being renamed: the row turns into a field in its own place.
+    if (vaultRenaming && vaultRenaming.id === group.id) {
+      const form = el('form', 'vtree-new rename');
+      form.style.paddingLeft = `${8 + depth * 14 + 20}px`;
+      const input = el('input');
+      input.type = 'text';
+      input.spellcheck = false;
+      input.autocomplete = 'off';
+      input.maxLength = 100;
+      input.value = vaultRenaming.name;
+      input.addEventListener('input', () => {
+        vaultRenaming.name = input.value;
+      });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          vaultRenaming = null;
+          renderVaultTree();
+        }
+      });
+      form.append(svgIcon('folder'), input);
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        saveGroupRename();
+      });
+      tree.append(form);
+      if (vaultRenaming.error) tree.append(el('div', 'vtree-error', vaultRenaming.error));
+      setTimeout(() => {
+        if (document.activeElement !== input) {
+          input.focus();
+          if (!vaultRenaming.touched) input.select();
+          vaultRenaming.touched = true;
+        }
+      }, 0);
+      continue;
+    }
+
     const row = el('button', `vtree-row${group.id === vaultGroup ? ' current' : ''}${group.total ? '' : ' no-entries'}`);
     row.dataset.group = group.id;
     row.style.paddingLeft = `${8 + depth * 14}px`;
@@ -2318,6 +2358,7 @@ function renderVaultTree() {
 function chooseVaultGroup(id) {
   vaultGroup = id || null;
   vaultNewGroup = null;
+  vaultRenaming = null;
   document.body.classList.remove('vault-tree-open');
   if (vaultSearch.value) vaultSearch.value = '';
   refreshVaultList();
@@ -2347,6 +2388,105 @@ async function saveNewGroup() {
   toast(`Группа «${name}» создана`);
 }
 
+async function saveGroupRename() {
+  if (!vaultRenaming) return;
+  const { id } = vaultRenaming;
+  const name = (vaultRenaming.name || '').trim();
+  const res = await api.vault.renameGroup(id, name);
+  if (!res || !res.ok) {
+    vaultRenaming = { ...vaultRenaming, error: (res && res.error) || 'Не удалось переименовать' };
+    renderVaultTree();
+    return;
+  }
+  vaultRenaming = null;
+  await refreshVaultList(true);
+  toast(`Группа теперь «${name}»`);
+}
+
+/**
+ * Right click on a group: what can be done with it.
+ *
+ * Deleting asks twice, in the menu itself — the shade has nowhere to put a
+ * dialog box, and a group can hold dozens of passwords.
+ */
+function openGroupMenu(group, x, y) {
+  closeVaultMenu();
+  const count = group.total;
+  const items = [
+    ['note', 'Переименовать', () => {
+      vaultNewGroup = null;
+      vaultRenaming = { id: group.id, name: group.name, error: null, touched: false };
+      renderVaultTree();
+    }],
+    ['folder', 'Новая группа внутри', () => {
+      vaultRenaming = null;
+      vaultFolded.delete(group.id);
+      vaultNewGroup = { parentId: group.id, name: '', error: null };
+      renderVaultTree();
+    }],
+    null,
+    ['trash', 'Удалить группу', null],
+  ];
+
+  for (const item of items) {
+    if (!item) {
+      vaultMenu.append(el('div', 'sep'));
+      continue;
+    }
+    const [icon, label, run] = item;
+    const button = el('button', run ? null : 'danger');
+    button.append(svgIcon(icon));
+    const text = el('span', null, label);
+    button.append(text);
+    button.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (run) {
+        closeVaultMenu();
+        run();
+        return;
+      }
+      if (button.dataset.armed !== 'yes') {
+        button.dataset.armed = 'yes';
+        button.classList.add('armed');
+        text.textContent = count
+          ? `Ещё раз — в корзину вместе с ${count} ${count === 1 ? 'записью' : 'записями'}`
+          : 'Ещё раз — в корзину';
+        return;
+      }
+      closeVaultMenu();
+      const res = await api.vault.deleteGroup(group.id);
+      if (!res || !res.ok) {
+        toast((res && res.error) || 'Не удалось удалить группу');
+        return;
+      }
+      if (vaultGroup === group.id) vaultGroup = group.parentId || null;
+      await refreshVaultList();
+      toast(res.permanent ? `Группа «${res.name}» удалена навсегда` : `Группа «${res.name}» в корзине базы`);
+    });
+    vaultMenu.append(button);
+  }
+
+  // At the cursor, nudged back inside the panel when it would hang off it.
+  vaultMenu.hidden = false;
+  const size = vaultMenu.getBoundingClientRect();
+  const box = panel.getBoundingClientRect();
+  const left = Math.max(8, Math.min(x - box.left, box.width - size.width - 8));
+  const top = Math.max(8, Math.min(y - box.top, box.height - size.height - 8));
+  vaultMenu.style.left = `${Math.round(left)}px`;
+  vaultMenu.style.top = `${Math.round(top)}px`;
+}
+
+$('#vault-tree').addEventListener('contextmenu', (e) => {
+  const row = e.target.closest('.vtree-row');
+  const id = row && row.dataset.group;
+  const group = id && groupById(id);
+  if (!group) return;
+  e.preventDefault();
+  // The root of the database is not in the tree; everything that is may be
+  // renamed or removed.
+  openGroupMenu(group, e.clientX, e.clientY);
+});
+
 $('#vault-tree').addEventListener('click', (e) => {
   if (e.target.closest('[data-new-group]')) {
     e.stopPropagation();
@@ -2355,6 +2495,10 @@ $('#vault-tree').addEventListener('click', (e) => {
     return;
   }
   if (e.target.closest('.vtree-new')) return;
+  if (vaultRenaming) {
+    vaultRenaming = null;
+    renderVaultTree();
+  }
   const fold = e.target.closest('[data-fold]');
   if (fold && fold.dataset.fold) {
     e.stopPropagation();
@@ -2906,7 +3050,7 @@ vaultForm.addEventListener('submit', async (e) => {
   msg.className = 'note';
 
   const res = vaultFormId
-    ? await api.vault.update(vaultFormId, fields)
+    ? await api.vault.update(vaultFormId, fields, $('#vf-group').value)
     : await api.vault.create($('#vf-group').value, fields);
   save.disabled = false;
 

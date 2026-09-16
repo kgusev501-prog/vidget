@@ -543,6 +543,81 @@ class Vault extends EventEmitter {
     return { ok: true, id: idOf(group) };
   }
 
+  /** The group above this one, or null for the root. */
+  _parentOf(target) {
+    if (!this.db) return null;
+    let hit = null;
+    const walk = (group) => {
+      if (!group || hit) return;
+      for (const child of group.groups || []) {
+        if (child === target) {
+          hit = group;
+          return;
+        }
+        walk(child);
+      }
+    };
+    for (const root of this.db.groups || []) walk(root);
+    return hit;
+  }
+
+  /** Gives a group another name, keeping the tree free of look-alike siblings. */
+  async renameGroup(id, name) {
+    if (!this.db) return { ok: false, error: 'База закрыта' };
+    const group = id && this._groupById(id);
+    if (!group) return { ok: false, error: 'Группа не найдена' };
+    const title = String(name || '').trim();
+    if (!title) return { ok: false, error: 'Назовите группу' };
+    if (title.length > 100) return { ok: false, error: 'Слишком длинное название' };
+    if (title === group.name) return { ok: true, id };
+
+    const parent = this._parentOf(group);
+    const siblings = parent ? parent.groups || [] : this.db.groups || [];
+    const taken = siblings.some((g) => g !== group && String(g.name || '').toLowerCase() === title.toLowerCase());
+    if (taken) return { ok: false, error: `Группа «${title}» здесь уже есть` };
+
+    const was = group.name;
+    group.name = title;
+    if (group.times && group.times.update) group.times.update();
+    const res = await this._write(`группа «${was}» теперь «${title}»`);
+    if (!res.ok) {
+      group.name = was;
+      return res;
+    }
+    return { ok: true, id };
+  }
+
+  /**
+   * Sends a group, with everything in it, to the recycle bin — the way KeePass
+   * does it. Where the database keeps no bin, KeePass deletes for good, and so
+   * does this; the panel is told which of the two it was.
+   */
+  async deleteGroup(id) {
+    if (!this.db) return { ok: false, error: 'База закрыта' };
+    const group = id && this._groupById(id);
+    if (!group) return { ok: false, error: 'Группа не найдена' };
+    if (!this._parentOf(group)) return { ok: false, error: 'Корень базы не удаляется' };
+
+    const binId = this.db.meta.recycleBinUuid && this.db.meta.recycleBinUuid.id;
+    if (binId && idOf(group) === binId) return { ok: false, error: 'Корзину удаляют в самом KeePass' };
+    let holdsBin = false;
+    const walk = (g) => {
+      for (const child of g.groups || []) {
+        if (binId && idOf(child) === binId) holdsBin = true;
+        walk(child);
+      }
+    };
+    walk(group);
+    if (holdsBin) return { ok: false, error: 'В группе лежит корзина базы — её так не удалить' };
+
+    const name = group.name;
+    const permanent = !(this.db.meta.recycleBinEnabled && this.db.meta.recycleBinUuid);
+    this.db.remove(group);
+    const res = await this._write(`удаление группы «${name}»${permanent ? ' навсегда' : ''}`);
+    if (!res.ok) await this.reload();
+    return { ...res, name, permanent };
+  }
+
   /** Entries in a group and in every group under it. */
   inGroup(groupId) {
     this.touch();
@@ -617,16 +692,27 @@ class Vault extends EventEmitter {
   }
 
   /** Changes an existing entry, keeping what it said before. */
-  async updateEntry(id, fields) {
+  async updateEntry(id, fields, groupId) {
     if (!this.db) return { ok: false, error: 'База закрыта' };
     const held = this.byId.get(id);
     if (!held) return { ok: false, error: 'Запись не найдена' };
 
+    // The group picked in the form. It used to be ignored on an edit: only the
+    // fields were saved, and an entry stayed where it was whatever was chosen.
+    const target = groupId ? this._groupById(groupId) : null;
+    if (groupId && !target) return { ok: false, error: 'Группа не найдена' };
+    const binId = this.db.meta.recycleBinUuid && this.db.meta.recycleBinUuid.id;
+    if (target && binId && idOf(target) === binId) return { ok: false, error: 'В корзину — это удаление' };
+
     // The old values become a history entry, exactly as KeePass does it, so
     // nothing typed over is lost.
     held.entry.pushHistory();
-    this._applyFields(held.entry, fields);
+    this._applyFields(held.entry, fields || {});
     held.entry.times.update();
+    if (target && target !== held.group) {
+      this.db.move(held.entry, target);
+      if (held.entry.times.locationChanged !== undefined) held.entry.times.locationChanged = new Date();
+    }
 
     const res = await this._write(`правка записи «${text(held.entry.fields.get('Title'))}»`);
     if (!res.ok) {

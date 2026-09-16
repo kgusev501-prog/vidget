@@ -976,11 +976,13 @@ function registerVaultIpc() {
   // --- changing the database ---
   ipcMain.handle('vault:groups', () => vault.groups());
   ipcMain.handle('vault:in-group', (_e, id) => vault.inGroup(String(id || '')));
+  ipcMain.handle('vault:rename-group', (_e, { id, name } = {}) => vault.renameGroup(String(id || ''), name));
+  ipcMain.handle('vault:delete-group', (_e, id) => vault.deleteGroup(String(id || '')));
   ipcMain.handle('vault:create-group', (_e, { parentId, name } = {}) =>
     vault.createGroup({ parentId: parentId ? String(parentId) : null, name })
   );
   ipcMain.handle('vault:create', (_e, { groupId, fields }) => vault.createEntry({ groupId, fields }));
-  ipcMain.handle('vault:update', (_e, { id, fields }) => vault.updateEntry(id, fields));
+  ipcMain.handle('vault:update', (_e, { id, fields, groupId }) => vault.updateEntry(id, fields, groupId || null));
   ipcMain.handle('vault:delete', (_e, id) => vault.deleteEntry(id));
   ipcMain.handle('vault:generate', (_e, options) => generatePassword(options || {}));
 

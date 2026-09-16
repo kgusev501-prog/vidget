@@ -589,3 +589,86 @@ test('новая группа: пока база открыта в KeePass, не
   vault.lock();
   assert.equal((await vault.createGroup({ name: 'После замка' })).ok, false, 'в закрытую базу не пишет');
 });
+
+// ── renaming and deleting groups ───────────────────────────────────────────
+test('группа: переименование сохраняется и не даёт двух одинаковых рядом', async () => {
+  const { file } = await makeDatabase();
+  const { vault } = await openVault(file);
+  const mail = vault.groups().find((g) => g.name === 'Почта');
+  assert.equal((await vault.renameGroup(mail.id, 'Почтовые ящики')).ok, true);
+  const dup = await vault.renameGroup(mail.id, 'архив');
+  assert.equal(dup.ok, false, 'соседний «Архив» уже есть');
+  assert.match((await vault.renameGroup(mail.id, '  ')).error, /Назовите/);
+  vault.lock();
+
+  const again = await openVault(file);
+  const renamed = again.vault.groups().find((g) => g.id === mail.id);
+  assert.equal(renamed.name, 'Почтовые ящики');
+  assert.ok(again.vault.inGroup(mail.id).some((e) => e.title === 'Яндекс'), 'записи остались в группе');
+  again.vault.lock();
+});
+
+test('группа: удаление уводит её в корзину вместе с записями', async () => {
+  const { file } = await makeDatabase();
+  const { vault } = await openVault(file);
+  const mail = vault.groups().find((g) => g.name === 'Почта');
+  const res = await vault.deleteGroup(mail.id);
+  assert.equal(res.ok, true);
+  assert.equal(res.name, 'Почта');
+  assert.equal(res.permanent, false, 'корзина у базы есть');
+  assert.ok(!vault.groups().some((g) => g.name === 'Почта'), 'из дерева исчезла');
+  assert.ok(!vault.list().some((e) => e.title === 'Яндекс'), 'её записи тоже не видны');
+  vault.lock();
+
+  const creds = new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString(PASSWORD), null);
+  const db = await kdbxweb.Kdbx.load(new Uint8Array(fs.readFileSync(file)).buffer, creds);
+  const bin = db.getGroup(db.meta.recycleBinUuid);
+  assert.ok(bin.groups.some((g) => g.name === 'Почта'), 'группа лежит в корзине базы');
+});
+
+test('группа: корень и корзину не удалить, при открытом KeePass ничего не меняется', async () => {
+  const { file } = await makeDatabase();
+  const { vault } = await openVault(file);
+  const tree = vault.groups();
+  assert.match((await vault.deleteGroup(tree[0].id)).error, /Корень/);
+
+  const mail = tree.find((g) => g.name === 'Почта');
+  fs.writeFileSync(`${file}.lock`, '');
+  assert.equal((await vault.deleteGroup(mail.id)).ok, false);
+  assert.equal((await vault.renameGroup(mail.id, 'Другое')).ok, false);
+  const after = vault.groups().find((g) => g.id === mail.id);
+  assert.ok(after, 'группа на месте');
+  assert.equal(after.name, 'Почта', 'и имя прежнее');
+  fs.rmSync(`${file}.lock`);
+  vault.lock();
+});
+
+test('правка: выбранная в форме группа переносит запись, и перенос переживает переоткрытие', async () => {
+  const { file, ghId } = await makeDatabase();
+  const { vault } = await openVault(file);
+  const mail = vault.groups().find((g) => g.name === 'Почта');
+  const sub = await vault.createGroup({ parentId: mail.id, name: 'Работа' });
+
+  const res = await vault.updateEntry(ghId, { Title: 'GitHub' }, sub.id);
+  assert.equal(res.ok, true);
+  assert.equal(vault.list().find((e) => e.id === ghId).groupId, sub.id, 'запись в подгруппе');
+  assert.ok(vault.inGroup(mail.id).some((e) => e.id === ghId), 'и видна из родительской');
+  vault.lock();
+
+  const again = await openVault(file);
+  const moved = again.vault.list().find((e) => e.id === ghId);
+  assert.equal(moved.groupId, sub.id);
+  assert.equal(again.vault.secret(ghId), 'гит-пароль', 'пароль при переносе не пострадал');
+  again.vault.lock();
+});
+
+test('правка: без смены группы запись остаётся на месте, в корзину перенести нельзя', async () => {
+  const { file, ghId } = await makeDatabase();
+  const { vault } = await openVault(file);
+  const home = vault.list().find((e) => e.id === ghId).groupId;
+  assert.equal((await vault.updateEntry(ghId, { UserName: 'gus2' }, home)).ok, true);
+  assert.equal(vault.list().find((e) => e.id === ghId).groupId, home);
+  assert.equal((await vault.updateEntry(ghId, { UserName: 'gus3' })).ok, true, 'и без группы вовсе, как раньше');
+  assert.equal((await vault.updateEntry(ghId, {}, 'нет-такой')).ok, false);
+  vault.lock();
+});

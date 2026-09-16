@@ -3130,3 +3130,17 @@ body.portrait.vault-tree-open .vtree-row {
   font-size: 11px;
   color: #ff7b7b;
 }
+
+/* Removing a group: red from the start, redder once it waits for the second click. */
+#vault-menu button.danger,
+#vault-menu button.danger .i {
+  color: #ff8a8a;
+}
+
+#vault-menu button.armed {
+  background: rgba(255, 90, 90, 0.16);
+}
+
+.vtree-new.rename {
+  margin-top: 0;
+}
