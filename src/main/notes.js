@@ -1,12 +1,18 @@
 'use strict';
 
 const { EventEmitter } = require('events');
+const { plainLine } = require('../shared/markdown');
 
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
+// A note written in Markdown is titled by what its first line says, not by
+// its markup: "# **Покупки**" is the note «Покупки».
 const titleOf = (text) => {
-  const line = (text || '').split('\n').find((l) => l.trim());
-  return (line || '').trim().slice(0, 80);
+  for (const line of (text || '').split('\n')) {
+    const plain = plainLine(line);
+    if (plain) return plain.slice(0, 80);
+  }
+  return '';
 };
 
 /** Flat list of quick notes, newest-edited first, pinned on top. */
