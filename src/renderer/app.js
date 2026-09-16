@@ -1753,8 +1753,19 @@ function renderNotes() {
     pinFlag(chip, n.pinned);
 
     chip.append(el('div', 'title', (n.title || '').trim() || 'Без заголовка'));
-    const rest = (n.text || '').split('\n').slice(1).join('\n').trim();
-    chip.append(el('div', 'txt', rest));
+    // The rest of the note, formatted. The line that became the title is not
+    // repeated, and a card shows only what fits at a glance.
+    const lines = api.md.parse(n.text || '');
+    const titleLine = lines.findIndex((l) => l.segments.some((s) => !s.mark && s.text.trim()));
+    const view = el('div', 'txt md-view');
+    let shown = 0;
+    lines.forEach((line, index) => {
+      if (index <= titleLine || shown >= 8) return;
+      if (!shown && line.kind === 'blank') return;
+      view.append(mdLine(line, index, false));
+      shown += 1;
+    });
+    chip.append(view);
 
     const foot = el('div', 'foot');
     foot.append(el('span', null, timeAgo(n.updated)));
@@ -1777,6 +1788,15 @@ noteStrip.addEventListener('click', (e) => {
   const act = e.target.dataset.act;
   if (act === 'pin') return api.notes.pin(id);
   if (act === 'del') return api.notes.remove(id);
+  // A box ticked straight on the card, without opening the note.
+  const box = e.target.closest('.md-box');
+  if (box) {
+    const note = noteItems.find((n) => n.id === id);
+    if (note) api.notes.update(id, api.md.toggleTask(note.text || '', Number(box.dataset.task)));
+    return;
+  }
+  const link = e.target.closest('.md-link');
+  if (link && link.dataset.href) return api.notes.openUrl(link.dataset.href);
   openNote(id);
 });
 
@@ -1796,8 +1816,30 @@ function growQuick() {
 
 noteQuick.addEventListener('input', growQuick);
 
+// The quick note is a plain field, but the same keys work in it as in the
+// editor: Shift+Enter carries a list on, Ctrl+B and Ctrl+I wrap the selection.
+function quickEdit(result) {
+  noteQuick.value = result.text;
+  noteQuick.setSelectionRange(result.start, result.end);
+  growQuick();
+}
+
+noteQuick.addEventListener('keydown', (e) => {
+  if (e.isComposing) return;
+  if (e.key === 'Enter' && e.shiftKey) {
+    e.preventDefault();
+    quickEdit(api.md.newLine(noteQuick.value, noteQuick.selectionStart, noteQuick.selectionEnd));
+    return;
+  }
+  const wrap = mdWrapKey(e);
+  if (wrap) {
+    e.preventDefault();
+    quickEdit(api.md.toggleWrap(noteQuick.value, noteQuick.selectionStart, noteQuick.selectionEnd, wrap));
+  }
+});
+
 noteQuick.addEventListener('keydown', async (e) => {
-  if (e.key !== 'Enter' || e.shiftKey) return;
+  if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
   e.preventDefault();
   const text = noteQuick.value.trim();
   if (!text) return;
@@ -1809,15 +1851,244 @@ noteQuick.addEventListener('keydown', async (e) => {
   toast('Заметка сохранена');
 });
 
+// ============================================================
+//  Markdown: drawing a line, and the live editor
+// ============================================================
+
+/** Ctrl+B → '**', Ctrl+I → '*', anything else → null. Layout-proof: by key code. */
+function mdWrapKey(e) {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return null;
+  if (e.code === 'KeyB') return '**';
+  if (e.code === 'KeyI') return '*';
+  return null;
+}
+
+/**
+ * One parsed line as elements.
+ *
+ * Every character of the line is in a text node, markup included, so the
+ * line's textContent is exactly what was typed. What is not text — the tick
+ * box, the bullet dot — is an empty element drawn by CSS, which adds nothing
+ * to that text. Markup is hidden by CSS too, never removed.
+ */
+function mdLine(line, index, editable) {
+  const classes = ['md-line', `md-${line.kind}`];
+  if (line.level) classes.push(`md-h${line.level}`);
+  if (line.checked) classes.push('md-done');
+  const row = el('div', classes.join(' '));
+  row.dataset.line = String(index);
+
+  if (line.indent) row.append(el('span', 'md-indent', line.indent));
+  if (line.kind === 'task') {
+    const box = el('span', `md-box${line.checked ? ' on' : ''}`);
+    box.dataset.task = String(index);
+    box.contentEditable = 'false';
+    box.title = line.checked ? 'Снять отметку' : 'Отметить';
+    row.append(box);
+  }
+  if (line.kind === 'bullet') {
+    const dot = el('span', 'md-dot');
+    dot.contentEditable = 'false';
+    row.append(dot);
+  }
+  if (line.marker) row.append(el('span', `md-mark md-marker${line.kind === 'ordered' ? ' md-num' : ''}`, line.marker));
+
+  for (const seg of line.segments) {
+    const span = el('span', null, seg.text);
+    const cls = [];
+    if (seg.mark) cls.push('md-mark');
+    for (const style of seg.styles) cls.push(`md-${style}`);
+    if (seg.href && !seg.mark) {
+      cls.push('md-link');
+      span.dataset.href = seg.href;
+      span.title = editable ? `${seg.href}  (Ctrl+клик — открыть)` : seg.href;
+    }
+    if (cls.length) span.className = cls.join(' ');
+    row.append(span);
+  }
+  // An empty line still needs a height, and a place for the caret.
+  if (editable && !line.raw) row.append(document.createElement('br'));
+  return row;
+}
+
+// --- the live editor --------------------------------------------------------
+// The text is the truth; the elements are redrawn from it after every change,
+// and the caret is put back by counting characters. That is why it does not
+// matter what the browser does to the elements while typing: whatever they
+// hold is read back as text and drawn again, correctly.
+const mdState = { text: '', composing: false, history: [], future: [], lastAt: 0 };
+
+const mdLines = () => [...noteText.children];
+
+/** The editor's text, line by line. */
+function mdRead() {
+  const parts = [];
+  for (const node of noteText.childNodes) {
+    if (node.nodeType === Node.TEXT_NODE) parts.push(node.textContent);
+    else if (node.nodeType === Node.ELEMENT_NODE && node.tagName !== 'BR') parts.push(node.textContent);
+  }
+  return (parts.length ? parts.join('\n') : '').replace(/\u200b/g, '');
+}
+
+/** Character offset of a DOM position inside the editor. */
+function mdOffset(node, offset) {
+  if (node === noteText) {
+    let total = 0;
+    const kids = [...noteText.childNodes];
+    for (let i = 0; i < offset && i < kids.length; i++) total += kids[i].textContent.length + 1;
+    return Math.max(0, total - (offset >= kids.length && kids.length ? 1 : 0));
+  }
+  let total = 0;
+  for (const line of noteText.childNodes) {
+    if (line === node || line.contains(node)) {
+      const range = document.createRange();
+      range.selectNodeContents(line);
+      try {
+        range.setEnd(node, offset);
+      } catch {
+        return total;
+      }
+      return total + range.toString().length;
+    }
+    total += line.textContent.length + 1;
+  }
+  return Math.max(0, total - 1);
+}
+
+function mdSelection() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || !noteText.contains(sel.anchorNode)) {
+    const end = mdState.text.length;
+    return { start: end, end };
+  }
+  const range = sel.getRangeAt(0);
+  const a = mdOffset(range.startContainer, range.startOffset);
+  const b = mdOffset(range.endContainer, range.endOffset);
+  return { start: Math.min(a, b), end: Math.max(a, b) };
+}
+
+/** The DOM position for a character offset. */
+function mdPoint(pos) {
+  const lines = mdLines();
+  let rest = pos;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const length = line.textContent.length;
+    if (rest <= length || i === lines.length - 1) {
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      let node;
+      let last = null;
+      while ((node = walker.nextNode())) {
+        if (rest <= node.length) return [node, rest];
+        rest -= node.length;
+        last = node;
+      }
+      return last ? [last, last.length] : [line, 0];
+    }
+    rest -= length + 1;
+  }
+  return [noteText, 0];
+}
+
+function mdSetSelection(start, end) {
+  const sel = window.getSelection();
+  const range = document.createRange();
+  const [sn, so] = mdPoint(start);
+  const [en, eo] = mdPoint(end);
+  try {
+    range.setStart(sn, so);
+    range.setEnd(en, eo);
+  } catch {
+    return;
+  }
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+const mdLineIndex = (text, pos) => text.slice(0, pos).split('\n').length - 1;
+
+/** Shows the markup on the lines the selection touches, hides it elsewhere. */
+function mdMarkActive(start, end) {
+  const from = mdLineIndex(mdState.text, start);
+  const to = mdLineIndex(mdState.text, end);
+  mdLines().forEach((line, i) => line.classList.toggle('active', i >= from && i <= to));
+}
+
+function mdRender(text, start, end) {
+  mdState.text = text;
+  const lines = api.md.parse(text);
+  noteText.textContent = '';
+  lines.forEach((line, i) => noteText.append(mdLine(line, i, true)));
+  noteText.classList.toggle('is-empty', !text);
+  mdMarkActive(start, end);
+  if (document.activeElement === noteText) mdSetSelection(start, end);
+}
+
+/**
+ * Remembers a state for undo. Typing in quick succession is one step, the
+ * way a text field does it; a structural edit is always its own step.
+ */
+function mdRecord(kind) {
+  const now = Date.now();
+  const top = mdState.history[mdState.history.length - 1];
+  const sel = mdSelection();
+  const entry = { text: mdState.text, start: sel.start, end: sel.end, kind };
+  if (top && top.text === entry.text) return;
+  if (top && kind === 'typing' && top.kind === 'typing' && now - mdState.lastAt < 800) {
+    mdState.history[mdState.history.length - 1] = entry;
+  } else {
+    mdState.history.push(entry);
+    if (mdState.history.length > 200) mdState.history.shift();
+  }
+  mdState.future = [];
+  mdState.lastAt = now;
+}
+
+/** Applies a new text and selection from an editing move, as one undo step. */
+function mdApply(result, kind = 'edit') {
+  mdRender(result.text, result.start, result.end);
+  mdRecord(kind);
+  scheduleNoteSave();
+}
+
+function mdUndo() {
+  if (mdState.history.length < 2) return;
+  mdState.future.push(mdState.history.pop());
+  const prev = mdState.history[mdState.history.length - 1];
+  mdRender(prev.text, prev.start, prev.end);
+  scheduleNoteSave();
+}
+
+function mdRedo() {
+  const next = mdState.future.pop();
+  if (!next) return;
+  mdState.history.push(next);
+  mdRender(next.text, next.start, next.end);
+  scheduleNoteSave();
+}
+
+function scheduleNoteSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushNote, 350);
+}
+
 function openNote(id) {
   const note = noteItems.find((n) => n.id === id);
   if (!note) return;
   editingId = id;
-  noteText.value = note.text || '';
   $('#note-stamp').textContent = `изменено ${timeAgo(note.updated)}`;
   $('#note-pin').classList.toggle('on', !!note.pinned);
   noteEditor.hidden = false;
-  setTimeout(() => noteText.focus(), 30);
+  const text = note.text || '';
+  mdState.history = [];
+  mdState.future = [];
+  mdRender(text, text.length, text.length);
+  mdRecord('open');
+  setTimeout(() => {
+    noteText.focus();
+    mdSetSelection(text.length, text.length);
+    mdMarkActive(text.length, text.length);
+  }, 30);
 }
 
 function flushNote() {
@@ -1825,7 +2096,7 @@ function flushNote() {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
-  if (editingId) api.notes.update(editingId, noteText.value);
+  if (editingId) api.notes.update(editingId, mdState.text);
 }
 
 function closeNote() {
@@ -1835,9 +2106,127 @@ function closeNote() {
   loadNotes();
 }
 
+noteText.addEventListener('beforeinput', (e) => {
+  const type = e.inputType;
+  // New lines, undo and the browser's own formatting are ours to do; left to
+  // the browser they would build elements the text model knows nothing about.
+  if (type === 'insertParagraph' || type === 'insertLineBreak' || type.startsWith('format') || type === 'insertFromDrop') {
+    e.preventDefault();
+  } else if (type === 'historyUndo') {
+    e.preventDefault();
+    mdUndo();
+  } else if (type === 'historyRedo') {
+    e.preventDefault();
+    mdRedo();
+  }
+});
+
 noteText.addEventListener('input', () => {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(flushNote, 350);
+  if (mdState.composing) return;
+  const sel = mdSelection();
+  mdRender(mdRead(), sel.start, sel.end);
+  mdRecord('typing');
+  scheduleNoteSave();
+});
+
+noteText.addEventListener('compositionstart', () => {
+  mdState.composing = true;
+});
+noteText.addEventListener('compositionend', () => {
+  mdState.composing = false;
+  const sel = mdSelection();
+  mdRender(mdRead(), sel.start, sel.end);
+  mdRecord('typing');
+  scheduleNoteSave();
+});
+
+noteText.addEventListener('keydown', (e) => {
+  if (e.isComposing) return;
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+    // Enter saves and goes back to the notes; a new line is Shift+Enter.
+    e.preventDefault();
+    closeNote();
+    toast('Заметка сохранена');
+    return;
+  }
+  if (e.key === 'Enter' && e.shiftKey) {
+    e.preventDefault();
+    const sel = mdSelection();
+    mdApply(api.md.newLine(mdState.text, sel.start, sel.end));
+    return;
+  }
+  const wrap = mdWrapKey(e);
+  if (wrap) {
+    e.preventDefault();
+    const sel = mdSelection();
+    mdApply(api.md.toggleWrap(mdState.text, sel.start, sel.end, wrap));
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') {
+    e.preventDefault();
+    if (e.shiftKey) mdRedo();
+    else mdUndo();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyY') {
+    e.preventDefault();
+    mdRedo();
+    return;
+  }
+  if (e.key === 'Tab') {
+    // Tab and Shift+Tab move a line in or out — how lists get nested.
+    e.preventDefault();
+    const sel = mdSelection();
+    const text = mdState.text;
+    const lineStart = text.lastIndexOf('\n', sel.start - 1) + 1;
+    if (e.shiftKey) {
+      const lead = /^ {1,2}/.exec(text.slice(lineStart));
+      if (!lead) return;
+      const n = lead[0].length;
+      mdApply({
+        text: text.slice(0, lineStart) + text.slice(lineStart + n),
+        start: Math.max(lineStart, sel.start - n),
+        end: Math.max(lineStart, sel.end - n),
+      });
+    } else {
+      mdApply({ text: text.slice(0, lineStart) + '  ' + text.slice(lineStart), start: sel.start + 2, end: sel.end + 2 });
+    }
+  }
+});
+
+noteText.addEventListener('paste', (e) => {
+  e.preventDefault();
+  const pasted = (e.clipboardData && e.clipboardData.getData('text/plain')) || '';
+  if (!pasted) return;
+  const clean = pasted.replace(/\r\n?/g, '\n');
+  const sel = mdSelection();
+  const text = mdState.text;
+  const pos = sel.start + clean.length;
+  mdApply({ text: text.slice(0, sel.start) + clean + text.slice(sel.end), start: pos, end: pos });
+});
+
+// The tick box: pressed with the mouse, never a place for the caret.
+noteText.addEventListener('mousedown', (e) => {
+  const box = e.target.closest('.md-box');
+  if (!box) return;
+  e.preventDefault();
+  const sel = mdSelection();
+  mdApply({ text: api.md.toggleTask(mdState.text, Number(box.dataset.task)), start: sel.start, end: sel.end });
+});
+
+noteText.addEventListener('click', (e) => {
+  const link = e.target.closest('.md-link');
+  if (link && (e.ctrlKey || e.metaKey) && link.dataset.href) {
+    e.preventDefault();
+    api.notes.openUrl(link.dataset.href);
+  }
+});
+
+// Moving the caret with the keys or the mouse changes which line shows its markup.
+document.addEventListener('selectionchange', () => {
+  if (noteEditor.hidden || document.activeElement !== noteText || mdState.composing) return;
+  const sel = mdSelection();
+  mdMarkActive(sel.start, sel.end);
 });
 
 $('#note-back').addEventListener('click', closeNote);

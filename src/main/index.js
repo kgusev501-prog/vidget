@@ -761,6 +761,10 @@ function registerIpc() {
   ipcMain.on('notes:update', (_e, { id, text }) => notes.update(id, text));
   ipcMain.on('notes:remove', (_e, id) => notes.remove(id));
   ipcMain.on('notes:pin', (_e, id) => notes.togglePin(id));
+  // A link in a note. Only the kinds the Markdown reader turns into links at all.
+  ipcMain.on('notes:open-url', (_e, url) => {
+    if (/^(https?:\/\/|mailto:)/i.test(String(url || ''))) shell.openExternal(String(url));
+  });
 
   ipcMain.handle('yt:origin', () => (web ? web.origin : null));
   ipcMain.handle('yt:search', (_e, query) => youtube.search(query));

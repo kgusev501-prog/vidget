@@ -3,6 +3,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 const { lineAt } = require('../shared/lrc');
+const markdown = require('../shared/markdown');
+const mdEdit = require('../shared/md-edit');
 
 // The panel asks which line is being sung several times a second. Handing the
 // whole list across the bridge each time would copy it each time, so the lines
@@ -52,7 +54,15 @@ contextBridge.exposeInMainWorld('vidget', {
     clear: () => ipcRenderer.send('clip:clear'),
     onItems: on('clip:items'),
   },
+  // Markdown for the notes: pure functions, run here where require works.
+  md: {
+    parse: (text) => markdown.parse(text),
+    newLine: (text, start, end) => mdEdit.newLine(text, start, end),
+    toggleWrap: (text, start, end, mark) => mdEdit.toggleWrap(text, start, end, mark),
+    toggleTask: (text, line) => mdEdit.toggleTask(text, line),
+  },
   notes: {
+    openUrl: (url) => ipcRenderer.send('notes:open-url', url),
     list: () => ipcRenderer.invoke('notes:list'),
     create: (text) => ipcRenderer.invoke('notes:create', text),
     update: (id, text) => ipcRenderer.send('notes:update', { id, text }),

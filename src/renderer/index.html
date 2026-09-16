@@ -195,7 +195,7 @@
           <!-- ── notes ─────────────────────────────────────────────── -->
           <div class="view" data-view="notes">
             <div class="toolbar">
-              <textarea id="note-quick" rows="1" placeholder="Быстрая заметка…   Enter — сохранить, Shift+Enter — новая строка" spellcheck="false"></textarea>
+              <textarea id="note-quick" rows="1" placeholder="Быстрая заметка…   Enter — сохранить, Shift+Enter — новая строка, **жирный**, - [ ] дело" spellcheck="false"></textarea>
               <input id="note-search" type="search" placeholder="Поиск…" spellcheck="false" />
             </div>
             <div id="note-strip" class="strip"></div>
@@ -264,7 +264,9 @@
             <button id="note-pin" class="icon-btn" title="Закрепить"><svg class="i"><use href="#i-star"/></svg></button>
             <button id="note-del" class="icon-btn" title="Удалить"><svg class="i"><use href="#i-trash"/></svg></button>
           </div>
-          <textarea id="note-text" placeholder="Пишите…" spellcheck="false"></textarea>
+          <!-- A live Markdown editor: formatting shows as you type, and the
+               markup itself only on the line the caret is on. -->
+          <div id="note-text" contenteditable="true" spellcheck="false" data-placeholder="Пишите…  Enter — сохранить, Shift+Enter — новая строка"></div>
         </div>
 
 
