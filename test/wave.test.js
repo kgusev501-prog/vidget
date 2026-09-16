@@ -349,3 +349,26 @@ test('титры: отказ «нет текста» переводится и �
   await ya.lyricsFor('42');
   assert.equal(asked, 1, 'это ответ, а не сбой — спрашивать снова незачем');
 });
+
+// ── the heart for the widget's own player ───────────────────────────────────
+test('лайк: у своего плеера сердечко по точному номеру трека, без поиска', async () => {
+  const ya = stubbed({});
+  ya.liked.add('777');
+  ya.likesAt = Date.now();
+  ya.pinTrack({ id: '777', albumId: '70', title: 'Топоры', artists: 'PALC' });
+  assert.equal(ya.current.id, '777');
+  assert.equal(ya.current.liked, true, 'пролайканный трек сразу с полным сердечком');
+  assert.ok(!ya.calls.some((c) => c.path === '/search'), 'в поиск не ходили');
+});
+
+test('лайк: эхо медиасессии своего плеера не подменяет точный трек догадкой', async () => {
+  const ya = stubbed({ '/search': { result: { tracks: { results: [{ id: 1, title: 'Топоры', artists: [{ name: 'PALC' }], albums: [{ id: 2 }] }] } } } });
+  ya.likesAt = Date.now();
+  ya.pinTrack({ id: '777', albumId: '70', title: 'Топоры', artists: 'PALC' });
+  await ya.onTrack('PALC|Топоры', 'PALC', 'Топоры');
+  assert.equal(ya.current.id, '777', 'остался точный номер, а не первый результат поиска');
+
+  ya.pinTrack(null);
+  await ya.onTrack('Другой|Трек', 'Другой', 'Трек');
+  assert.notEqual(ya.current.key, 'own|777', 'без своего плеера треки снова ищутся как раньше');
+});

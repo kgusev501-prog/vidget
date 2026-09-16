@@ -119,19 +119,31 @@
                 <button id="lyrics-btn" class="ctl small" title="Текст песни" hidden><svg class="i"><use href="#i-lyrics"/></svg></button>
               </div>
 
+              <!-- The two sides around play are wrappers that vanish in the wide
+                   panel (display: contents). On the phone-shaped panel they are
+                   what keeps play centred under the cover whatever sits beside it. -->
               <div id="controls">
-                <button id="shuffle" class="ctl small" title="Перемешать"><svg class="i"><use href="#i-shuffle"/></svg></button>
-                <button id="prev" class="ctl" title="Предыдущий"><svg class="i"><use href="#i-prev"/></svg></button>
+                <div class="ctl-side left">
+                  <button id="shuffle" class="ctl small" title="Перемешать"><svg class="i"><use href="#i-shuffle"/></svg></button>
+                  <button id="prev" class="ctl" title="Предыдущий"><svg class="i"><use href="#i-prev"/></svg></button>
+                </div>
                 <button id="play" class="ctl ctl-main" title="Пуск / пауза"><svg class="i"><use id="play-use" href="#i-play"/></svg></button>
-                <button id="next" class="ctl" title="Следующий"><svg class="i"><use href="#i-next"/></svg></button>
-                <button id="repeat" class="ctl small" title="Повтор"><svg class="i"><use id="repeat-use" href="#i-repeat"/></svg></button>
+                <div class="ctl-side right">
+                  <button id="next" class="ctl" title="Следующий"><svg class="i"><use href="#i-next"/></svg></button>
+                  <button id="repeat" class="ctl small" title="Повтор"><svg class="i"><use id="repeat-use" href="#i-repeat"/></svg></button>
+                </div>
               </div>
 
               <button id="open-player" class="btn ghost">Открыть Яндекс Музыку</button>
 
               <div id="vol">
                 <button id="vol-icon" class="ctl small" title="Без звука"><svg class="i"><use id="vol-use" href="#i-vol"/></svg></button>
-                <div id="vol-track"><div id="vol-fill"></div><div id="vol-knob"></div></div>
+                <!-- A plain row in the wide panel; a bubble with an upright slider
+                     over the speaker on the phone-shaped one. -->
+                <div id="vol-pop">
+                  <span id="vol-pct"></span>
+                  <div id="vol-track"><div id="vol-fill"></div><div id="vol-knob"></div></div>
+                </div>
               </div>
             </div>
 

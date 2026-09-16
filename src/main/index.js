@@ -819,6 +819,7 @@ function registerIpc() {
     return player.playUrl(`yandexmusic://album/${albumId}/track/${id}`);
   });
 
+  ipcMain.on('ya:pin', (_e, track) => yandex.pinTrack(track));
   ipcMain.handle('ya:like', () => yandex.toggleLike());
   ipcMain.handle('ya:dislike', () => yandex.toggleDislike());
   ipcMain.on('ya:open-auth', () => shell.openExternal(yandex.authUrl()));

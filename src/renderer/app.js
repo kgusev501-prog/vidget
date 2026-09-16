@@ -34,6 +34,36 @@ const layout = {
 };
 const isSideEdge = () => layout.edge === 'left' || layout.edge === 'right';
 
+/**
+ * One row of buttons on the phone-shaped panel, with play in the middle.
+ *
+ * The reactions and the speaker live in their own places in the wide panel.
+ * CSS cannot move an element into another box, so here they are carried into
+ * the two sides of the play row, and carried back when the panel turns wide.
+ */
+const playerHome = {};
+function arrangePlayer(portrait) {
+  const reactions = document.querySelector('#reactions');
+  const vol = document.querySelector('#vol');
+  const left = document.querySelector('.ctl-side.left');
+  const right = document.querySelector('.ctl-side.right');
+  if (!reactions || !vol || !left || !right) return;
+  if (!playerHome.reactions) {
+    playerHome.reactions = document.createComment('reactions');
+    reactions.before(playerHome.reactions);
+    playerHome.vol = document.createComment('vol');
+    vol.before(playerHome.vol);
+  }
+  if (portrait) {
+    if (reactions.parentElement !== left) left.prepend(reactions);
+    if (vol.parentElement !== right) right.append(vol);
+  } else {
+    if (reactions.parentElement === left) playerHome.reactions.after(reactions);
+    if (vol.parentElement === right) playerHome.vol.after(vol);
+    vol.classList.remove('open', 'held');
+  }
+}
+
 // How far the shade travels to open: its height when it drops from the top or
 // rises from the bottom, its width when it slides out of a side.
 const pullSpan = () => (isSideEdge() ? layout.panelRect.width : PANEL_H);
@@ -67,6 +97,7 @@ function applyShadeSize(size) {
   if (portrait) PANEL_H = layout.panelRect.height;
   root.setProperty('--panel-h', `${PANEL_H}px`);
   document.body.classList.toggle('portrait', portrait);
+  arrangePlayer(portrait);
   root.setProperty('--panel-w', `${layout.panelRect.width}px`);
   root.setProperty('--panel-x', `${layout.panelRect.x}px`);
   root.setProperty('--panel-y', `${layout.panelRect.y}px`);
@@ -607,6 +638,8 @@ $('#repeat').addEventListener('click', () => {
 
 function ratioFrom(track, e) {
   const r = track.getBoundingClientRect();
+  // The volume slider stands upright on the phone-shaped panel: up is louder.
+  if (r.height > r.width * 2) return Math.max(0, Math.min(1, (r.bottom - e.clientY) / r.height));
   return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
 }
 
@@ -683,8 +716,10 @@ let volState = { available: false, value: 0.5, muted: false };
 
 function paintVolume() {
   const pct = (volState.muted ? 0 : volState.value) * 100;
-  $('#vol-fill').style.width = `${pct}%`;
-  $('#vol-knob').style.left = `${pct}%`;
+  // One number drives both shapes: width and left in a row, height and bottom
+  // when the slider stands upright.
+  volBox.style.setProperty('--vol', `${pct}%`);
+  $('#vol-pct').textContent = String(Math.round(pct));
   $('#vol-use').setAttribute('href', volState.muted || volState.value < 0.01 ? '#i-mute' : '#i-vol');
   volBox.classList.toggle('off', !volState.available);
 }
@@ -725,6 +760,24 @@ volTrack.addEventListener('pointermove', (e) => {
 
 volTrack.addEventListener('pointerup', () => {
   volDrag = false;
+  volBox.classList.remove('held');
+});
+
+volTrack.addEventListener('pointerdown', () => volBox.classList.add('held'));
+
+// On the phone-shaped panel the slider is a bubble over the speaker. It opens
+// under the cursor and stays while the hand is on it or dragging; the speaker
+// itself still mutes on click, as everywhere else.
+let volCloseTimer = null;
+volBox.addEventListener('pointerenter', () => {
+  if (volCloseTimer) clearTimeout(volCloseTimer);
+  volBox.classList.add('open');
+});
+volBox.addEventListener('pointerleave', () => {
+  if (volCloseTimer) clearTimeout(volCloseTimer);
+  volCloseTimer = setTimeout(() => {
+    if (!volBox.classList.contains('held')) volBox.classList.remove('open');
+  }, 350);
 });
 
 // Wheel over the volume group nudges it; the UI paints at once and the actual
@@ -803,8 +856,24 @@ function paintReactions() {
   dislikeBtn.title = why || (yaTrack.disliked ? 'Снять дизлайк' : 'Не нравится — не рекомендовать');
 }
 
+// Liking is one click; taking a favourite away is two. A heart sits where the
+// hand goes for play and next, and a stray click used to quietly drop a track
+// out of the collection.
+let unlikeArmed = null;
 likeBtn.addEventListener('click', async () => {
   if (!yaStatus.connected) return openYa();
+  if (yaTrack.liked && unlikeArmed !== yaTrack.id) {
+    unlikeArmed = yaTrack.id;
+    likeBtn.classList.add('armed');
+    toast('Уже в избранном. Нажмите ещё раз, чтобы убрать');
+    setTimeout(() => {
+      unlikeArmed = null;
+      likeBtn.classList.remove('armed');
+    }, 3000);
+    return;
+  }
+  unlikeArmed = null;
+  likeBtn.classList.remove('armed');
   const r = await api.ya.like();
   toast(r.ok ? (r.liked ? 'Добавлено в избранное' : 'Убрано из избранного') : r.error);
 });
@@ -1179,6 +1248,7 @@ function pushOwnState() {
 /** Hands the panel back to whatever else Windows has, if anything. */
 function releaseOwn() {
   own.track = null;
+  api.ya.pinTrack(null);
   own.repeat = 'None';
   words.lines = null;
   words.shown = -2;
@@ -1310,6 +1380,7 @@ async function playTrack(track) {
   wave.on = true;
   wave.current = track;
   own.track = track;
+  api.ya.pinTrack(track);
 
   lastTrack = {
     id: track.id,

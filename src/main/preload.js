@@ -86,6 +86,9 @@ contextBridge.exposeInMainWorld('vidget', {
       timedLines = Array.isArray(lines) ? lines : [];
     },
     lineAt: (seconds) => lineAt(timedLines, seconds),
+    // The own player's exact track, so the heart is never a guess.
+    pinTrack: (t) =>
+      ipcRenderer.send('ya:pin', t ? { id: t.id, albumId: t.albumId, title: t.title, artists: t.artists } : null),
     like: () => ipcRenderer.invoke('ya:like'),
     dislike: () => ipcRenderer.invoke('ya:dislike'),
     openAuth: () => ipcRenderer.send('ya:open-auth'),

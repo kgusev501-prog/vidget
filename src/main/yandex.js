@@ -239,7 +239,42 @@ class YandexMusic extends EventEmitter {
   }
 
   // --- track resolution -----------------------------------------------------
+  /**
+   * The widget's own player says exactly which track it is playing.
+   *
+   * Everything else is known only by title and artist and has to be found by
+   * search, which can pick a remaster or a cover — and then the heart shows the
+   * wrong state, inviting a click that unlikes a favourite. The own player has
+   * the catalogue id, so likes use that. Its Windows media session reports the
+   * same title and artist a moment later; that report must not replace the
+   * exact answer with a guessed one.
+   */
+  pinTrack(track) {
+    if (!track || !/^\d{1,15}$/.test(String(track.id || ''))) {
+      this.pinned = null;
+      return;
+    }
+    const smtcKey = `${track.artists || ''}|${track.title || ''}`;
+    const key = `own|${track.id}`;
+    this.pinned = { key, smtcKey };
+    if (this.current.key === key) return;
+
+    // No cover template here: the own player shows its own artwork already.
+    const hit = { id: String(track.id), albumId: track.albumId ? String(track.albumId) : null, cover: null };
+    this.tracks.set(smtcKey, hit);
+    this.current = { key, id: null, albumId: null, cover: null, liked: false, disliked: false, state: 'idle' };
+    if (!this.connected) {
+      this._pushTrack();
+      return;
+    }
+    this._apply(hit);
+    // Likes made elsewhere since the last look should show on this heart too.
+    this.refreshLikes().catch(() => {});
+  }
+
   async onTrack(key, artist, title) {
+    // The own player's exact track stands; its media session only echoes it.
+    if (this.pinned && (key === this.pinned.smtcKey || key === this.pinned.key)) return;
     if (key) this.lastSeen = { key, artist, title };
     if (this.current.key === key) return;
     this.current = { key, id: null, albumId: null, cover: null, liked: false, disliked: false, state: 'idle' };

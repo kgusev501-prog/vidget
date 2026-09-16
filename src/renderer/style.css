@@ -563,7 +563,7 @@ body.seeking #seek-knob {
   left: 0;
   top: 0;
   bottom: 0;
-  width: 60%;
+  width: var(--vol, 60%);
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.75);
 }
@@ -571,7 +571,7 @@ body.seeking #seek-knob {
 #vol-knob {
   position: absolute;
   top: 50%;
-  left: 60%;
+  left: var(--vol, 60%);
   width: 10px;
   height: 10px;
   margin-left: -5px;
@@ -2581,7 +2581,6 @@ body.portrait .player {
     "art art"
     "text text"
     "controls controls"
-    "reactions vol"
     "open open";
   align-content: center;
   justify-items: center;
@@ -2616,20 +2615,134 @@ body.portrait #np-artist > span {
   text-overflow: ellipsis;
 }
 
+/* Every button in one row. Play takes the middle column and the two sides
+   take equal shares of what is left, so play stays under the centre of the
+   cover however many buttons each side happens to hold. */
 body.portrait #controls {
   grid-area: controls;
-  gap: 18px;
+  justify-self: stretch;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 6px;
+}
+
+body.portrait .ctl-side {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+body.portrait .ctl-side.left {
+  justify-content: flex-end;
+}
+
+body.portrait .ctl-side.right {
+  justify-content: flex-start;
+}
+
+body.portrait #controls .ctl {
+  width: 34px;
+  height: 34px;
+}
+
+body.portrait #controls .ctl.small {
+  width: 30px;
+  height: 30px;
+}
+
+body.portrait #controls .ctl-main {
+  width: 50px;
+  height: 50px;
 }
 
 body.portrait #reactions {
-  grid-area: reactions;
-  justify-self: start;
+  gap: 0;
 }
 
+/* The speaker, with its slider as a bubble standing above it. */
 body.portrait #vol {
-  grid-area: vol;
-  width: 150px;
-  justify-self: end;
+  position: relative;
+  width: auto;
+  gap: 0;
+}
+
+body.portrait #vol.off {
+  pointer-events: auto;
+}
+
+body.portrait #vol-pop {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  z-index: 6;
+  width: 42px;
+  height: 156px;
+  padding: 10px 0 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 21px;
+  background: var(--card-hi);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 6px);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+body.portrait #vol.open #vol-pop,
+body.portrait #vol.held #vol-pop {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+}
+
+/* A bridge over the gap between the speaker and the bubble, so moving the
+   pointer up into the bubble does not count as leaving. */
+body.portrait #vol-pop::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 8px;
+}
+
+body.portrait #vol-pct {
+  display: block;
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+body.portrait #vol-track {
+  flex: 1 1 auto;
+  width: 4px;
+  height: auto;
+}
+
+body.portrait #vol-track::before {
+  inset: 0 -12px;
+}
+
+body.portrait #vol-fill {
+  top: auto;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  height: var(--vol, 60%);
+}
+
+body.portrait #vol-knob {
+  top: auto;
+  left: 50%;
+  bottom: var(--vol, 60%);
+  margin-left: 0;
+  transform: translate(-50%, 50%);
 }
 
 body.portrait #open-player {
@@ -2950,4 +3063,19 @@ body.portrait.vault-tree-open .vtree-row {
 #vault-search {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* The two sides of the play row only exist on the phone-shaped panel. */
+.ctl-side,
+#vol-pop {
+  display: contents;
+}
+
+#vol-pct {
+  display: none;
+}
+
+/* A favourite waiting for the second click that would take it away. */
+#like.armed {
+  background: rgba(255, 77, 106, 0.18);
 }
