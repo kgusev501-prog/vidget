@@ -3386,3 +3386,13 @@ body.portrait.vault-tree-open .vtree-row {
 .chip.note .title {
   flex: 0 0 auto;
 }
+
+/* Where a click opens the link, the cursor says so. */
+#note-text .md-line:not(.active) .md-link {
+  cursor: pointer;
+}
+
+#note-text .md-line:not(.active) .md-link:hover,
+.md-view .md-link:hover {
+  text-decoration-color: currentColor;
+}

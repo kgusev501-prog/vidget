@@ -58,6 +58,9 @@ function inline(source, styles = []) {
       out.push({ text: hit.open, mark: true, styles: styles.slice() });
       out.push({ text: hit.inner, styles: [...styles, 'code'] });
       out.push({ text: hit.close, mark: true, styles: styles.slice() });
+    } else if (hit.kind === 'url') {
+      // A bare address is its own link: no markup around it to hide.
+      out.push({ text: hit.text, styles: [...styles, 'link'], href: hit.href });
     } else if (hit.kind === 'link') {
       out.push({ text: '[', mark: true, styles: styles.slice() });
       for (const piece of inline(hit.inner, [...styles, 'link'])) out.push({ ...piece, href: hit.href });
@@ -89,6 +92,12 @@ function nextInline(s) {
     href: m[2],
     close: `](${m[2]})`,
   }));
+  // Addresses typed as they are — which is how people actually paste them into
+  // a note. Trailing punctuation belongs to the sentence, not to the address.
+  find('url', /(?<![\p{L}\p{N}/@.])(?:https?:\/\/|www\.)[^\s<>()\[\]]*[^\s<>()\[\].,;:!?"'»…]/gu, (m) => ({
+    text: m[0],
+    href: /^www\./i.test(m[0]) ? `https://${m[0]}` : m[0],
+  }));
   // Bold closes on the last two of a run of stars, so **bold *italic*** keeps
   // its italic inside rather than ending the bold one star too early.
   find('b', /\*\*(?=\S)([\s\S]*?\S)\*\*(?!\*)/g, (m) => ({ open: '**', inner: m[1], close: '**' }));
@@ -101,7 +110,7 @@ function nextInline(s) {
 
   if (!candidates.length) return null;
   // Earliest wins; at the same place, code first — nothing inside code is markup.
-  const order = { code: 0, link: 1, b: 2, s: 3, i: 4 };
+  const order = { code: 0, link: 1, url: 2, b: 3, s: 4, i: 5 };
   candidates.sort((a, b) => a.index - b.index || order[a.kind] - order[b.kind]);
   return candidates[0];
 }

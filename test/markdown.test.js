@@ -157,3 +157,19 @@ test('галочка: клик меняет только свою строку',
   assert.equal(edit.toggleTask(note, 3), note, 'не галочка — без изменений');
   assert.equal(edit.toggleTask(note, 99), note);
 });
+
+test('разбор: простой адрес без разметки тоже ссылка', () => {
+  const line = md.parseLine('см. https://github.com/kgusev501-prog/vidget.');
+  const link = line.segments.find((s) => s.href);
+  assert.equal(link.text, 'https://github.com/kgusev501-prog/vidget', 'точка в конце — от предложения');
+  assert.equal(link.href, link.text);
+  assert.ok(!line.segments.some((s) => s.mark), 'прятать нечего');
+  assert.equal(joined(line), 'см. https://github.com/kgusev501-prog/vidget.');
+
+  const www = md.parseLine('www.example.com/a_b_c, дальше').segments.find((s) => s.href);
+  assert.equal(www.href, 'https://www.example.com/a_b_c', 'www получает https, подчёркивания не курсив');
+
+  assert.ok(!md.parseLine('почта a@www.b.com').segments.some((s) => s.href), 'часть адреса почты — не ссылка');
+  assert.ok(!md.parseLine('javascript:alert(1)').segments.some((s) => s.href));
+  assert.ok(!md.parseLine('`https://в.коде`').segments.some((s) => s.href), 'в коде адрес остаётся кодом');
+});

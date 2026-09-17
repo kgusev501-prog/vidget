@@ -1901,7 +1901,7 @@ function mdLine(line, index, editable) {
     if (seg.href && !seg.mark) {
       cls.push('md-link');
       span.dataset.href = seg.href;
-      span.title = editable ? `${seg.href}  (Ctrl+клик — открыть)` : seg.href;
+      span.title = editable ? `${seg.href}  (клик — открыть, в редактируемой строке Ctrl+клик)` : seg.href;
     }
     if (cls.length) span.className = cls.join(' ');
     row.append(span);
@@ -2207,19 +2207,26 @@ noteText.addEventListener('paste', (e) => {
 
 // The tick box: pressed with the mouse, never a place for the caret.
 noteText.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+
+  // A link opens on a plain click where it is shown as a link — on a line not
+  // being edited. On the line under the caret the address is text being
+  // edited, so there a plain click places the caret and Ctrl+click opens.
+  const link = e.target.closest('.md-link');
+  if (link && link.dataset.href) {
+    const line = link.closest('.md-line');
+    if (e.ctrlKey || e.metaKey || (line && !line.classList.contains('active'))) {
+      e.preventDefault();
+      api.notes.openUrl(link.dataset.href);
+      return;
+    }
+  }
+
   const box = e.target.closest('.md-box');
   if (!box) return;
   e.preventDefault();
   const sel = mdSelection();
   mdApply({ text: api.md.toggleTask(mdState.text, Number(box.dataset.task)), start: sel.start, end: sel.end });
-});
-
-noteText.addEventListener('click', (e) => {
-  const link = e.target.closest('.md-link');
-  if (link && (e.ctrlKey || e.metaKey) && link.dataset.href) {
-    e.preventDefault();
-    api.notes.openUrl(link.dataset.href);
-  }
 });
 
 // Moving the caret with the keys or the mouse changes which line shows its markup.
