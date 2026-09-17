@@ -3653,9 +3653,61 @@ $('#set-update-url').addEventListener('change', (e) =>
   api.app.setSetting('updateUrl', e.target.value.trim())
 );
 
+// --- the update offer -------------------------------------------------------
+// The widget checks for a newer version on its own. When there is one, a small
+// notice waits in the panel: update now, skip this version, or close it and be
+// reminded next time the widget starts. Nothing downloads without a click.
+let updateState = { status: 'idle' };
+let updateSkipped = '';
+let updateDismissed = false;
+
+function paintUpdateOffer() {
+  const box = $('#update-offer');
+  const st = updateState || {};
+  const show = api.app.shouldOffer(st, updateSkipped, updateDismissed);
+  box.hidden = !show;
+  if (!show) return;
+
+  const busy = st.status === 'downloading' || st.status === 'ready' || st.status === 'installing';
+  $('#uo-title').textContent =
+    st.status === 'error' ? 'Обновление не удалось' : busy ? 'Обновление' : `Доступна версия ${st.version}`;
+  $('#uo-sub').textContent = st.status === 'available' ? 'Виджет перезапустится сам' : st.message || '';
+  $('#uo-bar').hidden = st.status !== 'downloading';
+  $('#uo-bar i').style.width = `${Math.max(0, Math.min(100, st.percent || 0))}%`;
+  $('#uo-now').hidden = busy;
+  $('#uo-now').textContent = st.status === 'error' ? 'Повторить' : 'Обновить';
+  $('#uo-skip').hidden = busy || st.status === 'error';
+  $('#uo-close').hidden = busy;
+}
+
+$('#uo-now').addEventListener('click', () => {
+  updateDismissed = false;
+  api.app.updateNow();
+});
+
+$('#uo-skip').addEventListener('click', async () => {
+  updateSkipped = await api.app.skipUpdate(updateState.version);
+  paintUpdateOffer();
+  toast(`Версия ${updateState.version} пропущена — предложим следующую`);
+});
+
+$('#uo-close').addEventListener('click', () => {
+  // Only for now: the offer comes back the next time the widget starts.
+  updateDismissed = true;
+  paintUpdateOffer();
+});
+
+(async () => {
+  const s = await api.app.settings();
+  updateSkipped = s.skippedVersion || '';
+  updateState = (await api.app.updateState()) || updateState;
+  paintUpdateOffer();
+})();
+
 api.app.onUpdate((st) => {
+  updateState = st || { status: 'idle' };
+  paintUpdateOffer();
   $('#set-update').textContent = st && st.message ? `— ${st.message}` : '';
-  if (st && st.downloaded) toast('Обновление готово, встанет при выходе');
 });
 
 $('#set-vault-pick').addEventListener('click', () => pickVaultFile());

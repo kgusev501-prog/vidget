@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const { lineAt } = require('../shared/lrc');
 const markdown = require('../shared/markdown');
+const updateOffer = require('../shared/update-offer');
 const mdEdit = require('../shared/md-edit');
 
 // The panel asks which line is being sung several times a second. Handing the
@@ -145,6 +146,10 @@ contextBridge.exposeInMainWorld('vidget', {
     settings: () => ipcRenderer.invoke('app:settings'),
     setSetting: (key, value) => ipcRenderer.invoke('app:set-setting', { key, value }),
     checkUpdate: () => ipcRenderer.invoke('app:check-update'),
+    updateState: () => ipcRenderer.invoke('app:update-state'),
+    updateNow: () => ipcRenderer.invoke('app:update-now'),
+    skipUpdate: (version) => ipcRenderer.invoke('app:update-skip', version),
+    shouldOffer: (state, skipped, dismissed) => updateOffer.shouldOffer(state, skipped, dismissed),
     onUpdate: on('app:update'),
     quit: () => ipcRenderer.send('app:quit'),
   },

@@ -629,9 +629,11 @@ async function init() {
   // Retries on its own: right after a reboot there is often no network yet.
   yandex.startAutoConnect(loadToken);
 
-  // Looks for a newer build once the machine has settled, and only if an
-  // address was configured; it never interrupts on its own.
-  updater.checkQuietly(settings.get().updateUrl, (st) => send('app:update', st));
+  // Looks for a newer build a little after start and then every few hours.
+  // A found version is only offered in the panel; nothing downloads or
+  // installs until the user says so.
+  updater.onState((st) => send('app:update', st));
+  updater.schedule(() => settings.get().updateUrl);
 
   // Off by default: the widget plays on its own, so starting the desktop app
   // would only put a second player on the machine. Still available in the menu.
@@ -833,9 +835,16 @@ function registerIpc() {
     version: app.getVersion(),
     clipImages: clip.imageUsage(),
   }));
-  ipcMain.handle('app:check-update', () =>
-    updater.check(settings.get().updateUrl, (st) => send('app:update', st))
-  );
+  ipcMain.handle('app:check-update', () => updater.check(settings.get().updateUrl, { manual: true }));
+  ipcMain.handle('app:update-state', () => updater.current());
+  ipcMain.handle('app:update-now', () => updater.update());
+  // «Пропустить»: this version is not offered again; a newer one will be.
+  ipcMain.handle('app:update-skip', (_e, version) => {
+    const s = settings.get();
+    s.skippedVersion = String(version || '');
+    settings.set(s);
+    return s.skippedVersion;
+  });
   ipcMain.handle('app:set-setting', (_e, { key, value }) => {
     // Настройки паролей меняются здесь же, чтобы всё хранилось в одном файле.
     const s = settings.get();

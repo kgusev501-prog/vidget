@@ -247,6 +247,19 @@
           </div>
         </div>
 
+        <!-- A newer version is out: offered here, when the panel is opened. -->
+        <div id="update-offer" hidden>
+          <svg class="i"><use href="#i-expand"/></svg>
+          <div class="uo-text">
+            <b id="uo-title"></b>
+            <span id="uo-sub"></span>
+          </div>
+          <div id="uo-bar" hidden><i></i></div>
+          <button id="uo-skip" class="btn ghost">Пропустить</button>
+          <button id="uo-now" class="btn">Обновить</button>
+          <button id="uo-close" class="icon-btn" title="Напомнить позже"><svg class="i"><use href="#i-close"/></svg></button>
+        </div>
+
         <!-- overlays live inside the panel so they inherit its rounding -->
         <div id="preview" hidden>
           <div class="overlay-bar">
