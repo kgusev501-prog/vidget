@@ -1,6 +1,6 @@
 {
   "name": "vidget",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "iOS-style pull-down overlay widget for Windows 11: Yandex Music, clipboard history, YouTube, notes, KeePass passwords",
   "main": "src/main/index.js",
   "scripts": {
