@@ -1134,7 +1134,7 @@ function placeHandle() {
     left = layout.edge === 'left' ? 0 : W - w;
     // A tall plate keeps the same margin as the phone panel, so its corners
     // and shadow do not run into the end of the window.
-    const m = Math.max(0, Math.min(24, (H - h) / 2));
+    const m = Math.max(0, Math.min(48, (H - h) / 2));
     top = m + clampTo(layout.handle.y - h / 2 - m, H - h - 2 * m);
   } else {
     left = clampTo(layout.handle.x - w / 2, W - w);

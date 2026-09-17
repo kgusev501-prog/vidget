@@ -26,13 +26,19 @@ const HANDLE_DEPTH = 30;
 // Room beside the panel for its shadow to fade out.
 const SHADOW_ROOM = 68;
 
+// Room on the sides of the panel that do not touch the screen edge. The shadow
+// has to fade to nothing inside the window: a transparent window clips it at
+// its own border, and a window exactly as wide as the panel cut the shadow off
+// in hard vertical lines on either side.
+const SHADOW = 48;
+
 // On a side edge everything turns portrait. The words become a karaoke plate —
 // wide enough for a line to fit, as tall as the top plate is wide — and the
 // panel opens in the same footprint, laid out like a phone screen: a panel as
 // wide as a monitor sliding out of its side would cover half the desk.
 const KARAOKE_W = 420;
 const KARAOKE_H = 594;
-const KARAOKE_MARGIN = 24;
+const KARAOKE_MARGIN = SHADOW;
 
 const isSide = (edge) => edge === 'left' || edge === 'right';
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -74,6 +80,11 @@ function alongFor(area, edge, coordinate) {
   return (clamp(coordinate, t.from, t.to) - t.from) / (t.to - t.from);
 }
 
+/** How far the panel sits in from the window sides, leaving room for its shadow. */
+function inset(bounds, size) {
+  return Math.max(0, Math.round((bounds.width - Math.min(size.width, bounds.width)) / 2));
+}
+
 /** How tall the karaoke plate can be on this screen. */
 function karaokeHeight(area) {
   return Math.max(0, Math.min(KARAOKE_H, area.height - KARAOKE_MARGIN * 2));
@@ -94,7 +105,7 @@ function dockLayout(area, placement) {
 
   let bounds;
   if (!isSide(edge)) {
-    const width = Math.min(size.width, area.width);
+    const width = Math.min(area.width, size.width + SHADOW * 2);
     const height = size.height;
     bounds = {
       x: Math.round(clamp(centre - width / 2, area.x, right - width)),
@@ -118,10 +129,10 @@ function dockLayout(area, placement) {
   let panel;
   if (edge === 'top') {
     handle = { x: centre - bounds.x, y: 0 };
-    panel = { x: 0, y: 0, width: size.width, height: size.shade };
+    panel = { x: inset(bounds, size), y: 0, width: Math.min(size.width, bounds.width), height: size.shade };
   } else if (edge === 'bottom') {
     handle = { x: centre - bounds.x, y: bounds.height };
-    panel = { x: 0, y: bounds.height - size.shade, width: size.width, height: size.shade };
+    panel = { x: inset(bounds, size), y: bounds.height - size.shade, width: Math.min(size.width, bounds.width), height: size.shade };
   } else {
     handle = { x: edge === 'left' ? 0 : bounds.width, y: centre - bounds.y };
     const phone = { width: Math.min(KARAOKE_W, bounds.width), height: karaokeHeight(area) };
@@ -188,6 +199,7 @@ function placeAt(area, point, grabOffset = 0) {
 
 module.exports = {
   EDGES,
+  SHADOW,
   HANDLE_LEN,
   HANDLE_DEPTH,
   KARAOKE_W,

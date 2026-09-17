@@ -131,8 +131,10 @@ body.moving #handle .pill {
 #panel {
   position: absolute;
   top: 0;
-  left: 0;
-  width: 100%;
+  /* Set in from the window sides: the window is wider than the panel so its
+     shadow has room to fade out instead of being cut at the window border. */
+  left: var(--panel-x, 0px);
+  width: var(--panel-w, 100%);
   height: var(--panel-h);
   transform: translateY(calc(-100% + var(--pull)));
   background: var(--bg);
@@ -150,7 +152,11 @@ body.moving #handle .pill {
 body.open #panel,
 body.dragging #panel,
 body.animating #panel {
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5);
+  /* Two layers: a soft wide one that fades to nothing well inside the room the
+     window leaves around the panel, and a close one that gives the edge its
+     weight. The negative spread keeps the wide layer from reaching past the
+     sides, where a hard stop used to show. */
+  box-shadow: 0 18px 40px -10px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.28);
 }
 
 /* Catches clicks in the empty space under the shade. */
@@ -889,7 +895,7 @@ body.seeking #seek-knob {
 /* ── misc ────────────────────────────────────────────────── */
 #toast {
   position: absolute;
-  left: 50%;
+  left: calc(var(--panel-x, 0px) + var(--panel-w, 100%) / 2);
   top: calc(var(--panel-h) + 14px);
   transform: translate(-50%, -8px);
   padding: 7px 16px;
@@ -1514,7 +1520,7 @@ body.has-lyrics:not(.open) #handle .pill {
      desktop happens to be showing and cannot afford to be shy. */
   opacity: 1;
   background: rgba(14, 16, 22, 0.74);
-  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 10px 28px -8px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.25);
   backdrop-filter: blur(14px);
 }
 
@@ -2327,7 +2333,7 @@ body.edge-right #grip:hover span {
 body.edge-bottom.open #panel,
 body.edge-bottom.dragging #panel,
 body.edge-bottom.animating #panel {
-  box-shadow: 0 -14px 30px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 -18px 40px -10px rgba(0, 0, 0, 0.6), 0 -4px 12px rgba(0, 0, 0, 0.28);
 }
 
 /* Messages sit on the far side of the panel from the edge, or inside it on a

@@ -102,3 +102,23 @@ test('низкий экран: плита караоке ужимается, а 
   assert.ok(l.karaoke.height <= 700 - 48);
   assert.ok(inside(l.bounds, short));
 });
+
+test('тень: у панели есть место рассеяться со всех сторон, что не прижаты к краю экрана', () => {
+  for (const edge of ['top', 'bottom']) {
+    const l = dock.dockLayout(FHD, { edge, along: 0.5 });
+    assert.ok(l.panel.x >= dock.SHADOW, `${edge}: слева от панели есть место`);
+    assert.ok(l.bounds.width - l.panel.x - l.panel.width >= dock.SHADOW, `${edge}: и справа`);
+    assert.ok(inside(l.bounds, FHD));
+  }
+  for (const edge of ['left', 'right']) {
+    for (const along of [0, 0.5, 1]) {
+      const l = dock.dockLayout(FHD, { edge, along });
+      assert.ok(l.panel.y >= dock.SHADOW, `${edge} ${along}: над панелью`);
+      assert.ok(l.bounds.height - l.panel.y - l.panel.height >= dock.SHADOW, `${edge} ${along}: под панелью`);
+    }
+  }
+  const narrow = { x: 0, y: 0, width: 600, height: 700 };
+  const n = dock.dockLayout(narrow, { edge: 'top', along: 0.5 });
+  assert.ok(inside(n.bounds, narrow), 'на узком экране окно не шире экрана');
+  assert.ok(n.panel.x + n.panel.width <= n.bounds.width, 'и панель в окне');
+});
